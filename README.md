@@ -1,7 +1,10 @@
 # pypsa-evaluations
 This repository is a collection of various specific evaluations of pypsa-networks
 
-## Renewables Usage Map Visualization
+## Included Scripts 
+- [Renewable Usage Visualization](#renewable-usage-visualization)
+
+## Renewables Usage Visualization
 
 ### Overview
 
@@ -15,7 +18,7 @@ This script generates an interactive map visualization of optimal wind and solar
 ### Usage
 
 ```bash
-python renewables_usage.py
+python renewables_usagemap.py
 ```
 
 The script reads from the network file specified by `NETWORK_PATH` and outputs an interactive HTML map to `OUTPUT_HTML`.
