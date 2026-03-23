@@ -1,7 +1,7 @@
 # pypsa-evaluations
 This repository is a collection of various specific evaluations of pypsa-networks
 
-## Renewables Usage Visualization
+## Renewables Usage Map Visualization
 
 ### Overview
 
@@ -61,4 +61,36 @@ The generated map displays:
 - Informative hover tooltips with capacity values in GW
 
 ---
+
+## Carrier Usage Visualization
+
+### Usage
+
+Run the script directly:
+
+```bash
+python carrier_usage.py
+```
+
+The script loads one selected network (`SINGLE_NETWORK_FILE`) and a collection of model-year networks from `NETWORKS_FOLDER`.
+
+### What It Produces
+
+- A stacked time-series plot of biomass-related energy balance for Austria
+- A single pie chart for the selected year (`PIE_SINGLE_TITLE`)
+- A subplot figure with one pie chart per model year (`MODEL_YEARS`)
+
+### Quick Configuration
+
+Adjust these constants at the top of [carrier_usage.py](carrier_usage.py):
+
+- `NETWORKS_FOLDER`: folder containing `.nc` files for the network collection
+- `SINGLE_NETWORK_FILE`: one `.nc` file used for the time-series and single-year pie chart
+- `MODEL_YEARS`: labels for the per-year pie charts (must align with loaded networks)
+- `BUS_CARRIERS`, `EXCLUDED_CARRIER`, `ABSOLUTE_VALUES`: carrier filtering and value handling
+- `PLOT_RENDERER`: Plotly renderer (for example `browser`)
+
+### Example Output
+<img src="pngs/Biomass_timeseries_2050.png" alt="Renewable usage map" width="600" />
+<img src="pngs/Biomass_usage_all_years.png" alt="Renewable usage map" width="600" />
 
