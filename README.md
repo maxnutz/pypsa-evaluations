@@ -94,6 +94,6 @@ Adjust these constants at the top of [carrier_usage.py](carrier_usage.py):
 - `PLOT_RENDERER`: Plotly renderer (for example `browser`)
 
 ### Example Output
-<img src="pngs/Biomass_timeseries_2050.png" alt="Renewable usage map" width="600" />
-<img src="pngs/Biomass_usage_all_years.png" alt="Renewable usage map" width="600" />
++<img src="pngs/Biomass_timeseries_2050.png" alt="Biomass energy balance time series for Austria" width="600" />
++<img src="pngs/Biomass_usage_all_years.png" alt="Biomass usage across model years" width="600" />
 
