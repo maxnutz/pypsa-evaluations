@@ -59,10 +59,12 @@ def _patch_pypsa_apply_cmap() -> None:
     """Patch PyPSA's apply_cmap to handle pandas 2.x StringDtype.
 
     In pandas ≥ 2.0 creating a Series from a plain string scalar yields a
-    column with ``StringDtype``.  PyPSA ≤ 1.1.2 passes that directly to
-    ``numpy.issubdtype``, which cannot handle pandas extension types and
-    raises ``TypeError``.  This patch adds a try/except around the dtype
-    check so that string-colour columns fall through unchanged.
+    column with ``StringDtype``.  PyPSA's ``apply_cmap`` passes that directly
+    to ``numpy.issubdtype``, which cannot handle pandas extension types and
+    raises ``TypeError`` (confirmed in PyPSA 1.1.2; fixed status in later
+    versions unknown).  This patch wraps the dtype check in a try/except so
+    that string-colour columns fall through unchanged.  The patch is a no-op
+    on versions where the bug is already fixed.
 
     The patch is applied to the local name in ``pypsa.plot.maps.static``
     (where ``apply_cmap`` is imported by name) rather than to the source

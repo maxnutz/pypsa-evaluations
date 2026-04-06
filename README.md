@@ -58,7 +58,7 @@ pip install pypsa geopandas matplotlib cartopy shapely
 ### Notes
 
 - **Region index key**: the loader first attempts an exact match on `AUSTRIA_KEY`, then falls back to a prefix match (e.g. `"AT0"`, `"AT11"` …).  Adjust `AUSTRIA_KEY` if your regions file uses a different identifier.
-- **PyPSA ≤ 1.1.2 / pandas ≥ 2.0 compatibility**: the script applies a minimal monkey-patch to `pypsa.plot` to work around a known dtype-handling bug that causes `TypeError` when colours are derived from plain string scalars.
+- **PyPSA / pandas ≥ 2.0 compatibility**: the script applies a minimal monkey-patch to `pypsa.plot` to work around a known dtype-handling bug (confirmed in PyPSA 1.1.2) that causes `TypeError` when colours are derived from plain string scalars on pandas ≥ 2.0.  The patch is a no-op on versions where the bug is already fixed.
 
 ---
 
