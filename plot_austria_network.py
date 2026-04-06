@@ -26,9 +26,9 @@ import pypsa
 # Configuration – set these paths before running
 # ---------------------------------------------------------------------------
 
-NETWORK_FILE = "path/to/network.nc"
-REGIONS_ONSHORE_FILE = "path/to/regions_onshore.geojson"
-OUTPUT_PNG = "austria_network.png"
+NETWORK_FILE = "resources/base.nc"
+REGIONS_ONSHORE_FILE = "resources/regions_onshore.geojson"
+OUTPUT_PNG = "resources/austria_network.png"
 
 # Index key used for Austria in the regions file.
 # Common values: "AT" (PyPSA-Eur country level), "AT0" (NUTS-0).
@@ -36,16 +36,16 @@ OUTPUT_PNG = "austria_network.png"
 AUSTRIA_KEY = "AT"
 
 # Visual settings
-AUSTRIA_FACECOLOR = "#4A90D9"  # bright blue fill for Austria
+AUSTRIA_FACECOLOR = "#F7F8F7FB"  # bright blue fill for Austria
 AUSTRIA_EDGECOLOR = "white"
-AUSTRIA_ALPHA = 0.7
+AUSTRIA_ALPHA = 0.95
 LINE_COLOR = "#FFB347"  # orange for AC lines
-LINK_COLOR = "#FF6B6B"  # coral/red for DC links
+LINK_COLOR = "#FFB347"  # coral/red for DC links
 LINE_WIDTH_FACTOR = 2e3  # divisor for s_nom → line width scaling
 LINK_WIDTH_FACTOR = 2e3  # divisor for p_nom → link width scaling
 
 # Padding added to Austria's bounding box when setting the axis extent (degrees)
-EXTENT_PADDING = 0.5
+EXTENT_PADDING = 5
 
 # Output resolution
 OUTPUT_DPI = 150
@@ -121,9 +121,9 @@ def load_regions(regions_file: str, austria_key: str = AUSTRIA_KEY) -> gpd.GeoDa
     """
     regions = gpd.read_file(regions_file).set_index("name")
 
-    austria = regions[regions.index == austria_key]
+    austria = regions[regions.country == austria_key]
     if austria.empty:
-        austria = regions[regions.index.str.startswith(austria_key)]
+        austria = regions[regions.country.str.startswith(austria_key)]
 
     if austria.empty:
         available = ", ".join(regions.index[:20].tolist())
