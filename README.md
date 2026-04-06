@@ -3,7 +3,7 @@ This repository is a collection of various specific evaluations of pypsa-network
 
 ## Included Scripts 
 - [Austria Network Visualization](#austria-network-visualization)
-- [Renewable Usage Visualization](#renewable-usage-visualization)
+- [Renewables Usage Visualization](#renewables-usage-visualization)
 - [Carrier Usage Visualization](#carrier-usage-visualization)
 
 ## Austria Network Visualization
