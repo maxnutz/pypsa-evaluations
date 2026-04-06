@@ -2,7 +2,66 @@
 This repository is a collection of various specific evaluations of pypsa-networks
 
 ## Included Scripts 
-- [Renewable Usage Visualization](#renewable-usage-visualization)
+- [Austria Network Visualization](#austria-network-visualization)
+- [Renewables Usage Visualization](#renewables-usage-visualization)
+- [Carrier Usage Visualization](#carrier-usage-visualization)
+
+## Austria Network Visualization
+
+### Overview
+
+[`plot_austria_network.py`](plot_austria_network.py) generates a publication-ready, static PNG map of the PyPSA-Eur transmission network with a focus on the Austrian territory.
+
+The output figure shows:
+
+- **Austria polygon** filled in a bright blue colour, all other countries hidden
+- **Transmission lines** (AC) in orange, widths proportional to `s_nom`
+- **Transmission links** (DC) in coral/red, widths proportional to `p_nom`
+- **No buses** drawn
+- **Fully transparent** figure and axes background (PNG alpha channel)
+
+### Usage
+
+```bash
+python plot_austria_network.py
+```
+
+Edit the constants at the top of the script to point to your files before running:
+
+| Constant | Description |
+|----------|-------------|
+| `NETWORK_FILE` | Path to the PyPSA network file (`.nc`) |
+| `REGIONS_ONSHORE_FILE` | Path to onshore region polygons (GeoJSON / shapefile) |
+| `OUTPUT_PNG` | Destination path for the output PNG |
+| `AUSTRIA_KEY` | Index label for Austria in the regions file (default `"AT"`) |
+
+### Requirements
+
+Set up the environment with [pixi](https://pixi.sh):
+
+```bash
+pixi install
+pixi run python plot_austria_network.py
+```
+
+Or install dependencies manually:
+
+```bash
+pip install pypsa geopandas matplotlib cartopy shapely
+```
+
+- `pypsa` – network I/O and plotting
+- `geopandas` – spatial filtering and polygon rendering
+- `matplotlib` – figure creation and PNG export
+- `cartopy` – (optional) geographic projections
+- `shapely` – geometry operations
+
+### Notes
+
+- **Region index key**: the loader first attempts an exact match on `AUSTRIA_KEY`, then falls back to a prefix match (e.g. `"AT0"`, `"AT11"` …).  Adjust `AUSTRIA_KEY` if your regions file uses a different identifier.
+- **PyPSA / pandas ≥ 2.0 compatibility**: the script applies a minimal monkey-patch to `pypsa.plot` to work around a known dtype-handling bug (confirmed in PyPSA 1.1.2) that causes `TypeError` when colours are derived from plain string scalars on pandas ≥ 2.0.  The patch is a no-op on versions where the bug is already fixed.
+
+---
 
 ## Renewables Usage Visualization
 
