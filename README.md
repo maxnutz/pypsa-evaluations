@@ -5,6 +5,7 @@ This repository is a collection of various specific evaluations of pypsa-network
 - [Austria Network Visualization](#austria-network-visualization)
 - [Renewables Usage Visualization](#renewables-usage-visualization)
 - [Carrier Usage Visualization](#carrier-usage-visualization)
+- [Animated Renewable Availability](#animated-renewable-availability)
 
 ## Austria Network Visualization
 
@@ -160,15 +161,17 @@ Adjust these constants at the top of [carrier_usage.py](carrier_usage.py):
 
 ## Animated Renewable Availability
 
+<img src="pngs/solar_availability.gif" alt="GIF solar availability" width="800" />
+
 ### Overview
 
 [`animate_renewable_profiles.py`](animate_renewable_profiles.py) generates two
 animated visualisations – one for **onshore wind** and one for **solar** –
-that show how the hourly capacity factor changes per region over a user-defined
+that show how the hourly capacity availability factor changes per region over a user-defined
 time window.  Output is **MP4** (when `ffmpeg` is available on the system) or
 **GIF** (automatic fallback using Pillow).
 
-Each frame shows all regions coloured by their capacity factor at that hour:
+Each frame shows all regions coloured by their capacity availability factor at that hour:
 
 - **Wind** – `Blues` colormap (0 = white, 1 = dark blue)
 - **Solar** – `YlOrRd` colormap (0 = white, 1 = dark orange/red)
@@ -189,12 +192,15 @@ running:
 |---|---|
 | `WIND_PROFILE` | Path to `profile_adm_onwind.nc` |
 | `SOLAR_PROFILE` | Path to `profile_adm_solar.nc` |
-| `REGIONS_GEOJSON` | Path to `regions_onshore.geojson` |
+| `REGIONS_GEOJSON` | Path to the clustered `regions_onshore.geojson` |
 | `START_DATE` | Start of animation window (ISO-8601, e.g. `"2013-01-01"`) |
 | `END_DATE` | End of animation window (ISO-8601, e.g. `"2013-01-03"`) |
-| `OUTPUT_WIND` | Destination path for the wind animation |
-| `OUTPUT_SOLAR` | Destination path for the solar animation |
+| `OUTPUT_WIND` | Destination path for the wind animation. Determine output format by suffix! (one of "mp4", "gif") |
+| `OUTPUT_SOLAR` | Destination path for the solar animation. Determine output format by suffix! (one of "mp4", "gif") |
 | `FPS` | Frames per second (default `12`) |
+
+> [!TIP]
+> Be sure to read in the right Regions-File! The index of the Regions-file must match exactly to the Buses specified in the availability-files, so use file with **clustered** regions.
 
 ### Requirements
 
@@ -209,9 +215,7 @@ All required packages are declared in `pixi.toml` and installed by `pixi install
 | `pandas >= 2.0` | Time-index handling |
 | `pillow >= 9.0` | GIF export (fallback when `ffmpeg` absent) |
 
-For **MP4 output**, `ffmpeg` must be installed separately and available on
-`PATH` (e.g. `conda install -c conda-forge ffmpeg`).  The script detects its
-availability at runtime and falls back to GIF automatically.
+For **MP4 output**, `ffmpeg` is installed in pixi environment. If for some case, `ffmpeg` is not available, script automatically falls back to GIF-creation.
 
 ```bash
 pixi install
