@@ -92,18 +92,18 @@ WIND_PROFILE = Path("resources/profile_adm_onwind.nc")
 SOLAR_PROFILE = Path("resources/profile_adm_solar.nc")
 
 # Path to the region geometry file
-REGIONS_GEOJSON = Path("resources/regions_onshore.geojson")
+REGIONS_GEOJSON = Path("resources/regions_onshore_base_s_adm.geojson")
 
 # Animation time window (ISO-8601 strings)
-START_DATE = "2013-01-01"
-END_DATE = "2013-01-03"
+START_DATE = "2013-05-01"
+END_DATE = "2013-05-05"
 
 # Output file paths  (.mp4 preferred; .gif used as fallback when ffmpeg is absent)
-OUTPUT_WIND = Path("outputs/wind_availability.mp4")
+OUTPUT_WIND = Path("outputs/wind_availability.gif")
 OUTPUT_SOLAR = Path("outputs/solar_availability.mp4")
 
 # Frames per second for the output animation
-FPS = 12
+FPS = 5
 
 # ---------------------------------------------------------------------------
 # Visual settings (change only if you want to adjust the look)
@@ -401,7 +401,7 @@ def animate_profile(
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
-    cbar.set_label(f"{label} capacity factor", fontsize=10)
+    cbar.set_label(f"{label} availability factor", fontsize=10)
 
     # Title placeholder
     title_obj = ax.set_title("", fontsize=12, pad=8)
