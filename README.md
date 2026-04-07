@@ -156,3 +156,65 @@ Adjust these constants at the top of [carrier_usage.py](carrier_usage.py):
 +<img src="pngs/Biomass_timeseries_2050.png" alt="Biomass energy balance time series for Austria" width="600" />
 +<img src="pngs/Biomass_usage_all_years.png" alt="Biomass usage across model years" width="600" />
 
+---
+
+## Animated Renewable Availability
+
+### Overview
+
+[`animate_renewable_profiles.py`](animate_renewable_profiles.py) generates two
+animated visualisations – one for **onshore wind** and one for **solar** –
+that show how the hourly capacity factor changes per region over a user-defined
+time window.  Output is **MP4** (when `ffmpeg` is available on the system) or
+**GIF** (automatic fallback using Pillow).
+
+Each frame shows all regions coloured by their capacity factor at that hour:
+
+- **Wind** – `Blues` colormap (0 = white, 1 = dark blue)
+- **Solar** – `YlOrRd` colormap (0 = white, 1 = dark orange/red)
+- Regions with no matching profile value are shown in grey.
+- The current timestamp is displayed as the figure title.
+- A colorbar indicates the capacity-factor scale.
+
+### Usage
+
+```bash
+python animate_renewable_profiles.py
+```
+
+Edit the constants at the top of the script to point to your files before
+running:
+
+| Constant | Description |
+|---|---|
+| `WIND_PROFILE` | Path to `profile_adm_onwind.nc` |
+| `SOLAR_PROFILE` | Path to `profile_adm_solar.nc` |
+| `REGIONS_GEOJSON` | Path to `regions_onshore.geojson` |
+| `START_DATE` | Start of animation window (ISO-8601, e.g. `"2013-01-01"`) |
+| `END_DATE` | End of animation window (ISO-8601, e.g. `"2013-01-03"`) |
+| `OUTPUT_WIND` | Destination path for the wind animation |
+| `OUTPUT_SOLAR` | Destination path for the solar animation |
+| `FPS` | Frames per second (default `12`) |
+
+### Requirements
+
+All required packages are declared in `pixi.toml` and installed by `pixi install`:
+
+| Package | Purpose |
+|---|---|
+| `matplotlib >= 3.7` | Figure, animation, colormaps |
+| `geopandas >= 0.14` | Region polygon I/O and plotting |
+| `xarray >= 2023.1` | NetCDF file I/O |
+| `numpy >= 1.24` | Numerical operations |
+| `pandas >= 2.0` | Time-index handling |
+| `pillow >= 9.0` | GIF export (fallback when `ffmpeg` absent) |
+
+For **MP4 output**, `ffmpeg` must be installed separately and available on
+`PATH` (e.g. `conda install -c conda-forge ffmpeg`).  The script detects its
+availability at runtime and falls back to GIF automatically.
+
+```bash
+pixi install
+pixi run python animate_renewable_profiles.py
+```
+
