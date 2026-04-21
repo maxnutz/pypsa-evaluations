@@ -176,7 +176,7 @@ Each frame shows all regions coloured by their capacity availability factor at t
 
 - **Wind** – `Blues` colormap (0 = white, 1 = dark blue)
 - **Solar** – `YlOrRd` colormap (0 = white, 1 = dark orange/red)
-- **Combined (optional)** – `Greens` colormap, normalized by the global max of the full combined series
+- **Combined (optional)** – `Greens` colormap, normalized by the maximum value across all timestamps in the full combined dataset (not just the selected animation window)
 - Regions with no matching profile value are shown in grey.
 - The current timestamp is displayed as the figure title.
 - A colorbar indicates the capacity-factor scale.

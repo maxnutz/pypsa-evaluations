@@ -588,9 +588,13 @@ def main() -> None:
     # Optional combined (solar + wind)
     if ENABLE_COMBINED_ANIMATION:
         log.info("--- Combined ---")
+        # Keep only shared time/bus coordinates for deterministic summation.
+        # Buses/timesteps present in only one dataset are dropped by design.
         da_solar_aligned, da_wind_aligned = xr.align(da_solar_full, da_wind_full, join="inner")
         da_combined = da_solar_aligned + da_wind_aligned
 
+        # Normalize by the full combined dataset maximum (before date filtering)
+        # so color scaling stays consistent across different animation windows.
         combined_max = float(da_combined.max(skipna=True).item())
         if not np.isfinite(combined_max) or combined_max <= 0.0:
             raise ValueError(
