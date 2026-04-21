@@ -95,18 +95,18 @@ SOLAR_PROFILE = Path("resources/profile_adm_solar.nc")
 REGIONS_GEOJSON = Path("resources/regions_onshore_base_s_adm.geojson")
 
 # Animation time window (ISO-8601 strings)
-START_DATE = "2013-05-01"
-END_DATE = "2013-05-05"
+START_DATE = "2013-11-03"
+END_DATE = "2013-11-05"
 
 # Output file paths  (.mp4 preferred; .gif used as fallback when ffmpeg is absent)
-OUTPUT_WIND = Path("outputs/wind_availability.gif")
+OUTPUT_WIND = Path("outputs/wind_availability.mp4")
 OUTPUT_SOLAR = Path("outputs/solar_availability.mp4")
 
 # Frames per second for the output animation
-FPS = 5
+FPS = 3
 
 # Optional mode: limit geometry and buses to Austrian ("AT*") entries only
-AUSTRIA_ONLY = False
+AUSTRIA_ONLY = True
 
 # Optional suffix appended to output filenames when AUSTRIA_ONLY is enabled.
 # Set to "" to keep output names unchanged.
@@ -271,7 +271,7 @@ def filter_austria_buses(da: xr.DataArray, *, profile_label: str) -> xr.DataArra
     """Return only buses whose labels start with ``"AT"``."""
     bus_labels = pd.Index(da.bus.values.astype(str))
     mask = bus_labels.str.startswith("AT")
-    filtered = da.isel(bus=mask.to_numpy())
+    filtered = da.isel(bus=mask)
 
     if int(filtered.sizes["bus"]) == 0:
         raise ValueError(
