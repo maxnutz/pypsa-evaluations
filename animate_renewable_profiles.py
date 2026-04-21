@@ -95,15 +95,22 @@ SOLAR_PROFILE = Path("resources/profile_adm_solar.nc")
 REGIONS_GEOJSON = Path("resources/regions_onshore_base_s_adm.geojson")
 
 # Animation time window (ISO-8601 strings)
-START_DATE = "2013-05-01"
-END_DATE = "2013-05-05"
+START_DATE = "2013-11-03"
+END_DATE = "2013-11-05"
 
 # Output file paths  (.mp4 preferred; .gif used as fallback when ffmpeg is absent)
-OUTPUT_WIND = Path("outputs/wind_availability.gif")
+OUTPUT_WIND = Path("outputs/wind_availability.mp4")
 OUTPUT_SOLAR = Path("outputs/solar_availability.mp4")
 
 # Frames per second for the output animation
-FPS = 5
+FPS = 3
+
+# Optional mode: limit geometry and buses to Austrian ("AT*") entries only
+AUSTRIA_ONLY = True
+
+# Optional suffix appended to output filenames when AUSTRIA_ONLY is enabled.
+# Set to "" to keep output names unchanged.
+AUSTRIA_OUTPUT_SUFFIX = "_at"
 
 # ---------------------------------------------------------------------------
 # Visual settings (change only if you want to adjust the look)
@@ -243,6 +250,49 @@ def load_regions(geojson_path: Path) -> gpd.GeoDataFrame:
 
     log.info("  Loaded %d regions.", len(gdf))
     return gdf
+
+
+def filter_austria_regions(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Return only regions whose index starts with ``"AT"``."""
+    mask = gdf.index.astype(str).str.startswith("AT")
+    filtered = gdf.loc[mask]
+
+    if filtered.empty:
+        raise ValueError(
+            "Austria-only mode is enabled, but no Austrian regions were found "
+            "in the geometry input (expected index labels starting with 'AT')."
+        )
+
+    log.info("Austria-only regions: %d / %d", len(filtered), len(gdf))
+    return filtered
+
+
+def filter_austria_buses(da: xr.DataArray, *, profile_label: str) -> xr.DataArray:
+    """Return only buses whose labels start with ``"AT"``."""
+    bus_labels = pd.Index(da.bus.values.astype(str))
+    mask = bus_labels.str.startswith("AT")
+    filtered = da.isel(bus=mask)
+
+    if int(filtered.sizes["bus"]) == 0:
+        raise ValueError(
+            f"Austria-only mode is enabled, but no Austrian buses were found in "
+            f"{profile_label} profile input (expected bus labels starting with 'AT')."
+        )
+
+    log.info(
+        "Austria-only buses (%s): %d / %d",
+        profile_label,
+        int(filtered.sizes["bus"]),
+        int(da.sizes["bus"]),
+    )
+    return filtered
+
+
+def apply_output_suffix(path: Path, suffix: str) -> Path:
+    """Return *path* with *suffix* inserted before file extension."""
+    if not suffix:
+        return path
+    return path.with_name(f"{path.stem}{suffix}{path.suffix}")
 
 
 # ---------------------------------------------------------------------------
@@ -533,13 +583,20 @@ def _save_animation(anim: FuncAnimation, output_path: Path, fps: int) -> Path:
 
 def main() -> None:
     """Validate inputs, load data, and produce both wind and solar animations."""
+    output_wind = OUTPUT_WIND
+    output_solar = OUTPUT_SOLAR
+    if AUSTRIA_ONLY:
+        output_wind = apply_output_suffix(output_wind, AUSTRIA_OUTPUT_SUFFIX)
+        output_solar = apply_output_suffix(output_solar, AUSTRIA_OUTPUT_SUFFIX)
+
     log.info("=== animate_renewable_profiles.py ===")
+    log.info("Mode          : %s", "Austria-only" if AUSTRIA_ONLY else "All regions")
     log.info("Wind profile  : %s", WIND_PROFILE)
     log.info("Solar profile : %s", SOLAR_PROFILE)
     log.info("Regions       : %s", REGIONS_GEOJSON)
     log.info("Time window   : %s → %s", START_DATE, END_DATE)
-    log.info("Output wind   : %s", OUTPUT_WIND)
-    log.info("Output solar  : %s", OUTPUT_SOLAR)
+    log.info("Output wind   : %s", output_wind)
+    log.info("Output solar  : %s", output_solar)
     log.info("FPS           : %d", FPS)
 
     start = parse_date(START_DATE)
@@ -549,15 +606,19 @@ def main() -> None:
 
     # Load regions once (shared by both technologies)
     gdf = load_regions(REGIONS_GEOJSON)
+    if AUSTRIA_ONLY:
+        gdf = filter_austria_regions(gdf)
 
     # Process wind
     log.info("--- Wind ---")
     da_wind = load_profile(WIND_PROFILE)
+    if AUSTRIA_ONLY:
+        da_wind = filter_austria_buses(da_wind, profile_label="wind")
     da_wind = select_time_window(da_wind, start, end)
     animate_profile(
         da=da_wind,
         gdf=gdf,
-        output_path=OUTPUT_WIND,
+        output_path=output_wind,
         cmap_name=WIND_CMAP_NAME,
         label="Wind",
         fps=FPS,
@@ -566,11 +627,13 @@ def main() -> None:
     # Process solar
     log.info("--- Solar ---")
     da_solar = load_profile(SOLAR_PROFILE)
+    if AUSTRIA_ONLY:
+        da_solar = filter_austria_buses(da_solar, profile_label="solar")
     da_solar = select_time_window(da_solar, start, end)
     animate_profile(
         da=da_solar,
         gdf=gdf,
-        output_path=OUTPUT_SOLAR,
+        output_path=output_solar,
         cmap_name=SOLAR_CMAP_NAME,
         label="Solar",
         fps=FPS,
