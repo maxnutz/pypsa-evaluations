@@ -165,8 +165,9 @@ Adjust these constants at the top of [carrier_usage.py](carrier_usage.py):
 
 ### Overview
 
-[`animate_renewable_profiles.py`](animate_renewable_profiles.py) generates two
-animated visualisations – one for **onshore wind** and one for **solar** –
+[`animate_renewable_profiles.py`](animate_renewable_profiles.py) generates
+animated visualisations for **onshore wind** and **solar** (plus an optional
+**combined** solar+wind animation) –
 that show how the hourly capacity availability factor changes per region over a user-defined
 time window.  Output is **MP4** (when `ffmpeg` is available on the system) or
 **GIF** (automatic fallback using Pillow).
@@ -175,6 +176,7 @@ Each frame shows all regions coloured by their capacity availability factor at t
 
 - **Wind** – `Blues` colormap (0 = white, 1 = dark blue)
 - **Solar** – `YlOrRd` colormap (0 = white, 1 = dark orange/red)
+- **Combined (optional)** – `Greens` colormap, normalized by the global max of the full combined series
 - Regions with no matching profile value are shown in grey.
 - The current timestamp is displayed as the figure title.
 - A colorbar indicates the capacity-factor scale.
@@ -197,6 +199,9 @@ running:
 | `END_DATE` | End of animation window (ISO-8601, e.g. `"2013-01-03"`) |
 | `OUTPUT_WIND` | Destination path for the wind animation. Determine output format by suffix! (one of "mp4", "gif") |
 | `OUTPUT_SOLAR` | Destination path for the solar animation. Determine output format by suffix! (one of "mp4", "gif") |
+| `ENABLE_COMBINED_ANIMATION` | Enable/disable optional combined (solar + wind) animation |
+| `OUTPUT_COMBINED` | Destination path for the combined animation (used when `ENABLE_COMBINED_ANIMATION=True`) |
+| `COMBINED_CMAP_NAME` | Colormap for combined animation (default `Greens`) |
 | `FPS` | Frames per second (default `12`) |
 
 > [!TIP]
@@ -221,4 +226,3 @@ For **MP4 output**, `ffmpeg` is installed in pixi environment. If for some case,
 pixi install
 pixi run python animate_renewable_profiles.py
 ```
-
