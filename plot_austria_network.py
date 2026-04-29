@@ -28,7 +28,7 @@ import pypsa
 
 NETWORK_FILE = "resources/base.nc"
 REGIONS_ONSHORE_FILE = "resources/regions_onshore.geojson"
-OUTPUT_PNG = "resources/austria_network.png"
+OUTPUT_PNG = "outputs/austria_network.png"
 
 # Index key used for Austria in the regions file.
 # Common values: "AT" (PyPSA-Eur country level), "AT0" (NUTS-0).
@@ -36,16 +36,16 @@ OUTPUT_PNG = "resources/austria_network.png"
 AUSTRIA_KEY = "AT"
 
 # Visual settings
-AUSTRIA_FACECOLOR = "#F7F8F7FB"  # bright blue fill for Austria
-AUSTRIA_EDGECOLOR = "white"
+AUSTRIA_FACECOLOR = "#B4E03BCA"  # bright blue fill for Austria
+AUSTRIA_EDGECOLOR = "#B4E03BF4"
 AUSTRIA_ALPHA = 0.95
-LINE_COLOR = "#FFB347"  # orange for AC lines
-LINK_COLOR = "#FFB347"  # coral/red for DC links
-LINE_WIDTH_FACTOR = 2e3  # divisor for s_nom → line width scaling
-LINK_WIDTH_FACTOR = 2e3  # divisor for p_nom → link width scaling
+LINE_COLOR = "#131857"  # orange for AC lines
+LINK_COLOR = "#131857"  # coral/red for DC links
+LINE_WIDTH_FACTOR = 4e3  # divisor for s_nom → line width scaling
+LINK_WIDTH_FACTOR = 4e3  # divisor for p_nom → link width scaling
 
 # Padding added to Austria's bounding box when setting the axis extent (degrees)
-EXTENT_PADDING = 5
+EXTENT_PADDING = 8
 
 # Output resolution
 OUTPUT_DPI = 150

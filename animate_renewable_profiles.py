@@ -1,8 +1,9 @@
-"""Animated MP4/GIF visualization of hourly solar and wind availability per region.
+"""Animated MP4/GIF visualization of hourly solar, wind, and combined availability.
 
 This script reads renewable-profile NetCDF files (one for onshore wind, one for solar)
-and a GeoJSON file with region shapes, then produces two separate animations – one
-per technology – that show how the capacity-factor changes hour-by-hour across all
+and a GeoJSON file with region shapes, then produces separate animations – one
+per technology (and optionally a combined solar+wind animation) – that show how
+the capacity-factor changes hour-by-hour across all
 modelled regions over a user-defined time window.
 
 Configuration
@@ -37,6 +38,9 @@ Outputs
 
 ``OUTPUT_SOLAR``
     Destination path for the solar animation (``*.mp4`` or ``*.gif``).
+
+``ENABLE_COMBINED_ANIMATION`` / ``OUTPUT_COMBINED``
+    Optional combined solar+wind animation output and destination path.
 
 ``FPS``
     Frames per second for the output video.
@@ -101,6 +105,8 @@ END_DATE = "2013-11-05"
 # Output file paths  (.mp4 preferred; .gif used as fallback when ffmpeg is absent)
 OUTPUT_WIND = Path("outputs/wind_availability.mp4")
 OUTPUT_SOLAR = Path("outputs/solar_availability.mp4")
+ENABLE_COMBINED_ANIMATION = True
+OUTPUT_COMBINED = Path("outputs/combined_availability.mp4")
 
 # Frames per second for the output animation
 FPS = 3
@@ -118,6 +124,7 @@ AUSTRIA_OUTPUT_SUFFIX = "_at"
 
 WIND_CMAP_NAME = "Blues"
 SOLAR_CMAP_NAME = "YlOrRd"
+COMBINED_CMAP_NAME = "Greens"
 
 FIGURE_SIZE = (10, 8)
 EDGE_COLOR = "white"
@@ -582,7 +589,7 @@ def _save_animation(anim: FuncAnimation, output_path: Path, fps: int) -> Path:
 
 
 def main() -> None:
-    """Validate inputs, load data, and produce both wind and solar animations."""
+    """Validate inputs and produce wind/solar animations (+ optional combined)."""
     output_wind = OUTPUT_WIND
     output_solar = OUTPUT_SOLAR
     if AUSTRIA_ONLY:
@@ -595,6 +602,8 @@ def main() -> None:
     log.info("Solar profile : %s", SOLAR_PROFILE)
     log.info("Regions       : %s", REGIONS_GEOJSON)
     log.info("Time window   : %s → %s", START_DATE, END_DATE)
+    log.info("Combined anim : %s", ENABLE_COMBINED_ANIMATION)
+    log.info("Output combined: %s", OUTPUT_COMBINED)
     log.info("Output wind   : %s", output_wind)
     log.info("Output solar  : %s", output_solar)
     log.info("FPS           : %d", FPS)
@@ -611,10 +620,11 @@ def main() -> None:
 
     # Process wind
     log.info("--- Wind ---")
-    da_wind = load_profile(WIND_PROFILE)
+    da_wind_full = load_profile(WIND_PROFILE)
+    da_wind = select_time_window(da_wind_full, start, end)
     if AUSTRIA_ONLY:
         da_wind = filter_austria_buses(da_wind, profile_label="wind")
-    da_wind = select_time_window(da_wind, start, end)
+    # da_wind = select_time_window(da_wind, start, end)
     animate_profile(
         da=da_wind,
         gdf=gdf,
@@ -626,10 +636,11 @@ def main() -> None:
 
     # Process solar
     log.info("--- Solar ---")
-    da_solar = load_profile(SOLAR_PROFILE)
+    da_solar_full = load_profile(SOLAR_PROFILE)
+    da_solar = select_time_window(da_solar_full, start, end)
     if AUSTRIA_ONLY:
         da_solar = filter_austria_buses(da_solar, profile_label="solar")
-    da_solar = select_time_window(da_solar, start, end)
+    # da_solar = select_time_window(da_solar, start, end)
     animate_profile(
         da=da_solar,
         gdf=gdf,
@@ -638,6 +649,34 @@ def main() -> None:
         label="Solar",
         fps=FPS,
     )
+
+    # Optional combined (solar + wind)
+    if ENABLE_COMBINED_ANIMATION:
+        log.info("--- Combined ---")
+        # Keep only shared time/bus coordinates for deterministic summation.
+        # Buses/timesteps present in only one dataset are dropped by design.
+        da_solar_aligned, da_wind_aligned = xr.align(da_solar_full, da_wind_full, join="inner")
+        da_combined = da_solar_aligned + da_wind_aligned
+
+        # Normalize by the full combined dataset maximum (before date filtering)
+        # so color scaling stays consistent across different animation windows.
+        combined_max = float(da_combined.max(skipna=True).item())
+        if not np.isfinite(combined_max) or combined_max <= 0.0:
+            raise ValueError(
+                "Combined profile maximum is invalid (non-finite or <= 0); "
+                "cannot normalize combined animation."
+            )
+        da_combined = da_combined / combined_max
+
+        da_combined = select_time_window(da_combined, start, end)
+        animate_profile(
+            da=da_combined,
+            gdf=gdf,
+            output_path=OUTPUT_COMBINED,
+            cmap_name=COMBINED_CMAP_NAME,
+            label="Combined",
+            fps=FPS,
+        )
 
     log.info("=== Done ===")
 
