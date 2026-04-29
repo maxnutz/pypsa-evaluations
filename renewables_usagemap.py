@@ -17,15 +17,20 @@ NETWORK_PATH = Path(
 FALLBACK_REGIONS_PATH = Path(
     "/home/maxnutz/Documents/2026_EnInnov/run_outputs/pypsa-at-35/regions_onshore_base_s_adm.geojson"
 )
-OUTPUT_HTML = Path(__file__).with_name("renewables_links_map.html")
+OUTPUT_HTML = Path(__file__).with_name("regions_map.html")
+
+# Select map view:
+# "renewables": original map with renewable usage and AC/DC links.
+# "regions": only regions and borders, no links and no renewable usage coloring.
+MAP_VIEW = "regions"
 
 # Set to True to evaluate/colour only Austrian regions (name starts with "AT").
 # AC/DC links remain global in both modes.
-EVALUATE_AUSTRIA_ONLY = False
+EVALUATE_AUSTRIA_ONLY = True
 
 # Set to True to draw a pie chart on each region, representing the local
 # share of solar vs wind in that region's total renewables.
-SHOW_REGION_PIE_CHARTS = True
+SHOW_REGION_PIE_CHARTS = False
 
 # Pie radius in map degrees. Increase if pies should appear larger.
 PIE_RADIUS_DEG = 0.1
@@ -585,6 +590,53 @@ def make_plot(
     return fig
 
 
+def make_regions_only_plot(regions_gdf: gpd.GeoDataFrame) -> go.Figure:
+    """Build a map that shows only regions and borders."""
+    plot_gdf = regions_gdf.copy()
+    plot_gdf["region_fill"] = 1.0
+    geojson_dict = json.loads(plot_gdf.to_json())
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Choroplethmapbox(
+            geojson=geojson_dict,
+            locations=plot_gdf["name"],
+            z=plot_gdf["region_fill"],
+            featureidkey="properties.name",
+            colorscale=[
+                [0.0, "rgba(66,130,194,0.35)"],
+                [1.0, "rgba(232,237,243,0.35)"],
+            ],
+            marker_line_width=1.2,
+            marker_line_color="rgba(30,41,59,0.95)",
+            showscale=False,
+            hovertemplate="<b>%{location}</b><extra></extra>",
+            name="Regions",
+        )
+    )
+    add_country_border_traces(fig, plot_gdf)
+
+    minx, miny, maxx, maxy = plot_gdf.total_bounds
+    fig.update_layout(
+        mapbox=dict(
+            style="carto-positron",
+            center={"lon": (minx + maxx) / 2.0, "lat": (miny + maxy) / 2.0},
+            zoom=4.6,
+        ),
+        margin=dict(l=8, r=8, t=80, b=8),
+        paper_bgcolor="#f2f5f8",
+        plot_bgcolor="#f2f5f8",
+        showlegend=False,
+        title={
+            "text": "<b>Regions and Borders</b>",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": dict(size=25),
+        },
+    )
+    return fig
+
+
 def export_map_data_csv(
     regions_gdf: gpd.GeoDataFrame,
     renewable_split: pd.DataFrame,
@@ -665,6 +717,18 @@ def main() -> None:
 
     regions_gdf = load_region_geometries(network)
     region_names = set(regions_gdf["name"].astype(str))
+
+    if MAP_VIEW == "regions":
+        print("[INFO] Map view: REGIONS ONLY")
+        print(f"[INFO] Regions with polygon geometry: {len(regions_gdf)}")
+        fig = make_regions_only_plot(regions_gdf)
+        fig.write_html(OUTPUT_HTML, include_plotlyjs="cdn")
+        print(f"[DONE] Wrote interactive map to: {OUTPUT_HTML}")
+        return
+    if MAP_VIEW != "renewables":
+        raise ValueError("MAP_VIEW must be either 'renewables' or 'regions'")
+
+    print("[INFO] Map view: RENEWABLES")
 
     if DISPLAY_METRIC == "capacity":
         renewable_split = calculate_renewable_split_by_region_gw(
