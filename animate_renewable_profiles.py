@@ -105,7 +105,7 @@ END_DATE = "2013-11-05"
 # Output file paths  (.mp4 preferred; .gif used as fallback when ffmpeg is absent)
 OUTPUT_WIND = Path("outputs/wind_availability.mp4")
 OUTPUT_SOLAR = Path("outputs/solar_availability.mp4")
-ENABLE_COMBINED_ANIMATION = False
+ENABLE_COMBINED_ANIMATION = True
 OUTPUT_COMBINED = Path("outputs/combined_availability.mp4")
 
 # Frames per second for the output animation
