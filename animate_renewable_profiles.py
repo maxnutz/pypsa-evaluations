@@ -125,6 +125,33 @@ EDGE_WIDTH = 0.4
 MISSING_COLOR = "#cccccc"  # gray fill for regions with no matching profile value
 
 # ---------------------------------------------------------------------------
+# Highlight configuration – focus on specific regions
+# ---------------------------------------------------------------------------
+
+# Enable region-highlight mode.  When True, HIGHLIGHT_REGIONS receive a
+# prominent coloured border on every map frame.
+HIGHLIGHT_ENABLED = True
+
+# Region names to highlight.  These must match the "name" index of the
+# GeoJSON file and the "bus" coordinate of the NetCDF profiles.
+HIGHLIGHT_REGIONS: list[str] = ["AT11", "AT12", "AT13"]
+
+# Border colour and width used for the highlighted regions.
+HIGHLIGHT_EDGE_COLOR = "red"
+HIGHLIGHT_EDGE_WIDTH = 2.5
+
+# When True, a cumulative timeseries panel showing the mean availability of
+# the highlighted regions is rendered below the map.  Requires
+# HIGHLIGHT_ENABLED to be True as well.
+HIGHLIGHT_TIMESERIES_ENABLED = True
+
+# Y-axis label for the timeseries panel.
+HIGHLIGHT_TIMESERIES_YLABEL = "Mean availability factor"
+
+# Figure size when the timeseries panel is active.
+FIGURE_SIZE_WITH_TIMESERIES = (10, 11)
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
@@ -387,6 +414,83 @@ def build_frame_gdf(
 
 
 # ---------------------------------------------------------------------------
+# Highlight helpers
+# ---------------------------------------------------------------------------
+
+
+def validate_highlight_regions(
+    regions: list[str],
+    gdf: gpd.GeoDataFrame,
+    da: xr.DataArray,
+    profile_label: str,
+) -> list[str]:
+    """Validate highlight region names against *gdf* and *da* and return valid ones.
+
+    Parameters
+    ----------
+    regions:
+        Configured list of region names to highlight.
+    gdf:
+        Region GeoDataFrame indexed by bus/region name.
+    da:
+        Profile DataArray with a ``bus`` coordinate.
+    profile_label:
+        Human-readable label used in log messages (e.g. ``"wind"``).
+
+    Returns
+    -------
+    list[str]
+        Subset of *regions* that exist in both *gdf* and *da*.
+    """
+    gdf_names = set(gdf.index.astype(str))
+    bus_names = set(da.bus.values.astype(str))
+
+    valid: list[str] = []
+    for r in regions:
+        in_gdf = r in gdf_names
+        in_buses = r in bus_names
+        if in_gdf and in_buses:
+            valid.append(r)
+        else:
+            log.warning(
+                "Highlight region '%s' not found for %s "
+                "(in GDF: %s, in profile buses: %s) – skipping.",
+                r,
+                profile_label,
+                in_gdf,
+                in_buses,
+            )
+
+    if valid:
+        log.info("Valid highlight regions (%s): %s", profile_label, valid)
+    else:
+        log.warning("No valid highlight regions found for %s.", profile_label)
+    return valid
+
+
+def compute_highlight_series(da: xr.DataArray, regions: list[str]) -> pd.Series:
+    """Return the per-timestep mean availability factor for *regions*.
+
+    Parameters
+    ----------
+    da:
+        DataArray ``(time, bus)`` with capacity-factor values in ``[0, 1]``.
+    regions:
+        Subset of bus labels to aggregate.
+
+    Returns
+    -------
+    pd.Series
+        Series indexed by :class:`~pandas.DatetimeIndex` with one mean value
+        per timestep.
+    """
+    da_subset = da.sel(bus=regions)
+    mean_values = da_subset.mean(dim="bus").values
+    times = pd.DatetimeIndex(da.time.values)
+    return pd.Series(mean_values, index=times, name="highlight_mean")
+
+
+# ---------------------------------------------------------------------------
 # Animation builder
 # ---------------------------------------------------------------------------
 
@@ -410,6 +514,8 @@ def animate_profile(
     cmap_name: str,
     label: str,
     fps: int,
+    highlight_regions: list[str] | None = None,
+    highlight_series: pd.Series | None = None,
 ) -> None:
     """Generate and save an animation for a single technology profile.
 
@@ -427,6 +533,14 @@ def animate_profile(
         Technology label shown in the colorbar title (e.g. ``"Wind"``).
     fps:
         Frames per second.
+    highlight_regions:
+        Optional list of region names to draw with a highlighted border on
+        the map.  When *None* or empty the highlight feature is disabled.
+    highlight_series:
+        Optional pre-computed :class:`~pandas.Series` of mean availability
+        values for the highlighted regions (one value per timestep).  When
+        provided together with *highlight_regions*, a cumulative timeseries
+        panel is rendered below the map.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -437,8 +551,37 @@ def animate_profile(
     n_frames = len(times)
     log.info("Building %s animation: %d frames → %s", label, n_frames, output_path)
 
+    # Determine which highlight features are active
+    valid_highlight: list[str] = list(highlight_regions) if highlight_regions else []
+    show_timeseries: bool = bool(
+        valid_highlight
+        and highlight_series is not None
+        and len(highlight_series) > 0
+    )
+
+    # Pre-select the highlighted GeoDataFrame subset (geometry only)
+    highlight_gdf: gpd.GeoDataFrame | None = (
+        gdf.loc[gdf.index.isin(valid_highlight)] if valid_highlight else None
+    )
+
+    # Fixed y-axis upper bound for the timeseries panel
+    ts_ymax: float = (
+        float(highlight_series.max(skipna=True))
+        if show_timeseries and not highlight_series.isna().all()  # type: ignore[union-attr]
+        else 1.0
+    )
+    ts_ymax = max(ts_ymax, 0.01)  # guard against a degenerate zero-range axis
+
     # -- Figure setup --------------------------------------------------------
-    fig, ax = plt.subplots(figsize=FIGURE_SIZE)
+    ax_ts = None
+    if show_timeseries:
+        fig = plt.figure(figsize=FIGURE_SIZE_WITH_TIMESERIES)
+        gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.35)
+        ax = fig.add_subplot(gs[0])
+        ax_ts = fig.add_subplot(gs[1])
+    else:
+        fig, ax = plt.subplots(figsize=FIGURE_SIZE)
+
     ax.axis("off")
 
     bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
@@ -455,6 +598,10 @@ def animate_profile(
 
     # Title placeholder
     title_obj = ax.set_title("", fontsize=12, pad=8)
+
+    # Accumulated timeseries data (grown frame by frame)
+    ts_x: list[pd.Timestamp] = []
+    ts_y: list[float] = []
 
     # Track whether we warned about unmatched regions already
     warned_unmatched: set[str] = set()
@@ -509,11 +656,37 @@ def animate_profile(
                 legend=False,
             )
 
+        # Draw highlighted region borders on top of the fill
+        if highlight_gdf is not None and not highlight_gdf.empty:
+            highlight_gdf.plot(
+                ax=ax,
+                facecolor="none",
+                edgecolor=HIGHLIGHT_EDGE_COLOR,
+                linewidth=HIGHLIGHT_EDGE_WIDTH,
+            )
+
         ax.set_title(
             f"{label} availability  –  {t.strftime('%Y-%m-%d %H:%M')}",
             fontsize=12,
             pad=8,
         )
+
+        # -- Timeseries panel ------------------------------------------------
+        if show_timeseries and ax_ts is not None:
+            ts_x.append(t)
+            ts_y.append(float(highlight_series.iloc[i]))  # type: ignore[union-attr]
+
+            ax_ts.cla()
+            ax_ts.plot(ts_x, ts_y, color=HIGHLIGHT_EDGE_COLOR, linewidth=1.5)
+            ax_ts.set_xlim(times[0], times[-1])
+            ax_ts.set_ylim(0.0, ts_ymax * 1.05)
+            ax_ts.set_ylabel(HIGHLIGHT_TIMESERIES_YLABEL, fontsize=9)
+            ax_ts.tick_params(axis="x", labelsize=8)
+            ax_ts.tick_params(axis="y", labelsize=8)
+            ax_ts.set_title(
+                f"Highlighted regions: {', '.join(valid_highlight)}",
+                fontsize=9,
+            )
 
         if (i + 1) % max(1, n_frames // 10) == 0 or i == n_frames - 1:
             log.info("  Generated frame %d / %d", i + 1, n_frames)
@@ -598,6 +771,13 @@ def main() -> None:
     log.info("Output wind   : %s", output_wind)
     log.info("Output solar  : %s", output_solar)
     log.info("FPS           : %d", FPS)
+    log.info(
+        "Highlight     : %s%s",
+        "enabled" if HIGHLIGHT_ENABLED else "disabled",
+        f" (timeseries={'on' if HIGHLIGHT_TIMESERIES_ENABLED else 'off'})"
+        if HIGHLIGHT_ENABLED
+        else "",
+    )
 
     start = parse_date(START_DATE)
     end = parse_date(END_DATE)
@@ -615,6 +795,18 @@ def main() -> None:
     if AUSTRIA_ONLY:
         da_wind = filter_austria_buses(da_wind, profile_label="wind")
     da_wind = select_time_window(da_wind, start, end)
+
+    wind_highlight_regions: list[str] = []
+    wind_highlight_series: pd.Series | None = None
+    if HIGHLIGHT_ENABLED and HIGHLIGHT_REGIONS:
+        wind_highlight_regions = validate_highlight_regions(
+            HIGHLIGHT_REGIONS, gdf, da_wind, "wind"
+        )
+        if wind_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
+            wind_highlight_series = compute_highlight_series(
+                da_wind, wind_highlight_regions
+            )
+
     animate_profile(
         da=da_wind,
         gdf=gdf,
@@ -622,6 +814,8 @@ def main() -> None:
         cmap_name=WIND_CMAP_NAME,
         label="Wind",
         fps=FPS,
+        highlight_regions=wind_highlight_regions,
+        highlight_series=wind_highlight_series,
     )
 
     # Process solar
@@ -630,6 +824,18 @@ def main() -> None:
     if AUSTRIA_ONLY:
         da_solar = filter_austria_buses(da_solar, profile_label="solar")
     da_solar = select_time_window(da_solar, start, end)
+
+    solar_highlight_regions: list[str] = []
+    solar_highlight_series: pd.Series | None = None
+    if HIGHLIGHT_ENABLED and HIGHLIGHT_REGIONS:
+        solar_highlight_regions = validate_highlight_regions(
+            HIGHLIGHT_REGIONS, gdf, da_solar, "solar"
+        )
+        if solar_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
+            solar_highlight_series = compute_highlight_series(
+                da_solar, solar_highlight_regions
+            )
+
     animate_profile(
         da=da_solar,
         gdf=gdf,
@@ -637,6 +843,8 @@ def main() -> None:
         cmap_name=SOLAR_CMAP_NAME,
         label="Solar",
         fps=FPS,
+        highlight_regions=solar_highlight_regions,
+        highlight_series=solar_highlight_series,
     )
 
     log.info("=== Done ===")
