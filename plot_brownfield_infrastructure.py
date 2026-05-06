@@ -330,6 +330,12 @@ def build_infrastructure_table(
 	table["to_lat"] = table["to_region"].map(centers["lat"])
 	table = table.dropna(subset=["from_lon", "from_lat", "to_lon", "to_lat"]).copy()
 
+	# Sum capacities for all connections between the same region pair and carrier.
+	table = table.groupby(
+		["from_region", "to_region", "carrier"],
+		as_index=False,
+	).agg({"capacity_mw": "sum", "from_lon": "first", "from_lat": "first", "to_lon": "first", "to_lat": "first"})
+
 	table["pair_key"] = table["from_region"].where(
 		table["from_region"] <= table["to_region"],
 		table["to_region"],
