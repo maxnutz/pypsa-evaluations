@@ -198,9 +198,21 @@ running:
 | `OUTPUT_WIND` | Destination path for the wind animation. Determine output format by suffix! (one of "mp4", "gif") |
 | `OUTPUT_SOLAR` | Destination path for the solar animation. Determine output format by suffix! (one of "mp4", "gif") |
 | `FPS` | Frames per second (default `12`) |
+| `HIGHLIGHT_ENABLED` | Enable region-highlight mode (`True`/`False`) |
+| `HIGHLIGHT_REGIONS` | List of region names (matching GeoJSON index) to highlight with a red border |
+| `HIGHLIGHT_EDGE_COLOR` | Border colour for highlighted regions (default `"red"`) |
+| `HIGHLIGHT_EDGE_WIDTH` | Border line width for highlighted regions (default `2.5`) |
+| `HIGHLIGHT_TIMESERIES_ENABLED` | When `True`, a cumulative timeseries panel is rendered below the map showing the mean availability of the highlighted regions |
+| `HIGHLIGHT_TIMESERIES_YLABEL` | Y-axis label for the timeseries panel |
+| `FIGURE_SIZE_WITH_TIMESERIES` | Figure size `(width, height)` used when the timeseries panel is active |
 
 > [!TIP]
 > Be sure to read in the right Regions-File! The index of the Regions-file must match exactly to the Buses specified in the availability-files, so use file with **clustered** regions.
+
+#### Region highlighting
+Single or multiple regions can be highlighted (see Configuration variables above) and the mean availability profile for the respective region(s) is plotted as timeseries on the bottom of the animated map.
+
+<img src="pngs/wind_availability_small_area_at.gif" alt="GIF wind availability with highlight" width="800" />
 
 ### Requirements
 
