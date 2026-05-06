@@ -41,7 +41,6 @@ EDGE_OPACITY = 0.42
 MIN_WIDTH = 1.8
 MAX_WIDTH = 13.0
 WIDTH_BUCKETS = 6
-REGION_OUTLINE_COLOR = "rgba(245,248,252,0.95)"
 REGION_BORDER_COLOR = "rgba(100,116,139,0.4)"
 REGION_BORDER_WIDTH = 0.5
 COUNTRY_BORDER_COLOR = "rgba(24,36,58,0.9)"
@@ -381,8 +380,11 @@ def build_infrastructure_table(
 
 
 def add_region_layer(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	geojson_dict = json.loads(regions.to_json())
-	regions_sorted = regions.sort_values("name")
+	# Simplify geometries to reduce GeoJSON size while preserving visual appearance.
+	simplified = regions.copy()
+	simplified["geometry"] = simplified.geometry.simplify(tolerance=0.01, preserve_topology=True)
+	geojson_dict = json.loads(simplified.to_json())
+	regions_sorted = simplified.sort_values("name")
 	fig.add_trace(
 		go.Choroplethmapbox(
 			geojson=geojson_dict,
@@ -390,8 +392,8 @@ def add_region_layer(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
 			locations=regions_sorted["name"],
 			z=[1.0] * len(regions_sorted),
 			colorscale=[[0.0, "rgba(220,232,246,0.32)"], [1.0, "rgba(220,232,246,0.32)"]],
-			marker_line_width=0.55,
-			marker_line_color=REGION_OUTLINE_COLOR,
+			marker_line_width=REGION_BORDER_WIDTH,
+			marker_line_color=REGION_BORDER_COLOR,
 			showscale=False,
 			hovertemplate="<b>%{location}</b><extra></extra>",
 			name="Regions",
@@ -400,8 +402,14 @@ def add_region_layer(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
 
 
 def add_country_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	borders = regions.dissolve(by="country").geometry.boundary
-	show_legend = False
+	# Dissolve by country and simplify before extracting borders.
+	country_geoms = regions.dissolve(by="country")
+	country_geoms["geometry"] = country_geoms.geometry.simplify(tolerance=0.01, preserve_topology=True)
+	borders = country_geoms.geometry.boundary
+
+	# Collect all segments into a single trace, separated by None.
+	all_lons: list[float | None] = []
+	all_lats: list[float | None] = []
 	for border in borders:
 		if border.is_empty:
 			continue
@@ -410,50 +418,24 @@ def add_country_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
 			coords = list(line.coords)
 			if len(coords) < 2:
 				continue
-			lons = [c[0] for c in coords]
-			lats = [c[1] for c in coords]
-			fig.add_trace(
-				go.Scattermapbox(
-					lon=lons,
-					lat=lats,
-					mode="lines",
-					line={"width": COUNTRY_BORDER_WIDTH, "color": COUNTRY_BORDER_COLOR},
-					hoverinfo="skip",
-					name="Country borders",
-					legendgroup="country-borders",
-					showlegend=show_legend,
-				)
-			)
-			show_legend = False
+			all_lons.extend(c[0] for c in coords)
+			all_lons.append(None)
+			all_lats.extend(c[1] for c in coords)
+			all_lats.append(None)
 
-
-def add_region_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	"""Display individual region boundaries on the map."""
-	show_legend = False
-	for _, region in regions.iterrows():
-		boundary = region.geometry.boundary
-		if boundary.is_empty:
-			continue
-		lines = list(boundary.geoms) if boundary.geom_type == "MultiLineString" else [boundary]
-		for line in lines:
-			coords = list(line.coords)
-			if len(coords) < 2:
-				continue
-			lons = [c[0] for c in coords]
-			lats = [c[1] for c in coords]
-			fig.add_trace(
-				go.Scattermapbox(
-					lon=lons,
-					lat=lats,
-					mode="lines",
-					line={"width": REGION_BORDER_WIDTH, "color": REGION_BORDER_COLOR},
-					hoverinfo="skip",
-					name="Region borders",
-					legendgroup="region-borders",
-					showlegend=show_legend,
-				)
+	if all_lons:
+		fig.add_trace(
+			go.Scattermapbox(
+				lon=all_lons,
+				lat=all_lats,
+				mode="lines",
+				line={"width": COUNTRY_BORDER_WIDTH, "color": COUNTRY_BORDER_COLOR},
+				hoverinfo="skip",
+				name="Country borders",
+				legendgroup="country-borders",
+				showlegend=False,
 			)
-			show_legend = False
+		)
 
 
 def add_city_layer(fig: go.Figure, country_only: str | None) -> None:
@@ -482,12 +464,15 @@ def add_city_layer(fig: go.Figure, country_only: str | None) -> None:
 
 
 def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: dict[str, str]) -> None:
-	shown: set[str] = set()
-	grouped = infra.groupby(["carrier", "width_bucket", "width_bucket_px"], sort=False)
-
-	for (carrier, _, width_bucket_px), group in grouped:
+	# One trace per carrier: merge all segments with None separators.
+	# Hover markers are placed at mid-points so capacity info is accessible.
+	for carrier, group in infra.groupby("carrier", sort=False):
 		all_lon: list[float | None] = []
 		all_lat: list[float | None] = []
+		hover_lon: list[float] = []
+		hover_lat: list[float] = []
+		hover_text: list[str] = []
+
 		for row in group.itertuples(index=False):
 			lon, lat = curved_path(
 				float(row.from_lon),
@@ -501,21 +486,45 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
 			all_lon.append(None)
 			all_lat.extend(lat)
 			all_lat.append(None)
+			mid = len(lon) // 2
+			hover_lon.append(lon[mid])
+			hover_lat.append(lat[mid])
+			cap_gw = float(row.capacity_mw) / 1000.0
+			hover_text.append(
+				f"<b>{row.from_region} → {row.to_region}</b>"
+				f"<br>Carrier: {carrier}"
+				f"<br>Capacity: {cap_gw:.2f} GW"
+			)
 
-		show = str(carrier) not in shown
-		shown.add(str(carrier))
+		# Representative line width: median of the bucket widths for this carrier.
+		med_width = float(group["width_bucket_px"].median())
+		color = color_map.get(str(carrier), "#334155")
 
 		fig.add_trace(
 			go.Scattermapbox(
 				lon=all_lon,
 				lat=all_lat,
 				mode="lines",
-				line={"width": float(width_bucket_px), "color": color_map.get(str(carrier), "#334155")},
+				line={"width": med_width, "color": color},
 				opacity=EDGE_OPACITY,
 				name=str(carrier),
 				legendgroup=f"carrier::{carrier}",
-				showlegend=show,
-				hovertemplate=f"Carrier: {carrier}<extra></extra>",
+				showlegend=True,
+				hoverinfo="skip",
+			)
+		)
+		# Invisible hover markers at segment mid-points (no extra visual clutter).
+		fig.add_trace(
+			go.Scattermapbox(
+				lon=hover_lon,
+				lat=hover_lat,
+				mode="markers",
+				marker={"size": 8, "opacity": 0.0, "color": color},
+				text=hover_text,
+				hovertemplate="%{text}<extra></extra>",
+				name=str(carrier),
+				legendgroup=f"carrier::{carrier}",
+				showlegend=False,
 			)
 		)
 
@@ -555,7 +564,6 @@ def build_figure(regions: gpd.GeoDataFrame, infra: pd.DataFrame, country_only: s
 
 	color_map = generate_color_map(infra["carrier"].astype(str).tolist()) if not infra.empty else {}
 	add_region_layer(fig, regions)
-	add_region_borders(fig, regions)
 	add_country_borders(fig, regions)
 	if not infra.empty:
 		add_infrastructure_layers(fig, infra, color_map)
@@ -681,7 +689,11 @@ def export_figure(
 	output_html.parent.mkdir(parents=True, exist_ok=True)
 	output_static.parent.mkdir(parents=True, exist_ok=True)
 
-	fig.write_html(output_html, include_plotlyjs="cdn")
+	fig.write_html(
+		output_html,
+		include_plotlyjs="cdn",
+		config={"scrollZoom": True, "displayModeBar": True, "modeBarButtonsToRemove": ["toImage"]},
+	)
 	print(f"[DONE] HTML export: {output_html}")
 
 	try:
