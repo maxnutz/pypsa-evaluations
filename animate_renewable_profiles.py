@@ -133,8 +133,10 @@ MISSING_COLOR = "#cccccc"  # gray fill for regions with no matching profile valu
 HIGHLIGHT_ENABLED = True
 
 # Region names to highlight.  These must match the "name" index of the
-# GeoJSON file and the "bus" coordinate of the NetCDF profiles.
-HIGHLIGHT_REGIONS: list[str] = ["AT11", "AT12", "AT13"]
+# GeoJSON file and the "bus" coordinate of the NetCDF profiles exactly.
+# Run the script once with an empty list to see available names in the logs,
+# then populate accordingly.
+HIGHLIGHT_REGIONS: list[str] = []
 
 # Border colour and width used for the highlighted regions.
 HIGHLIGHT_EDGE_COLOR = "red"
@@ -442,8 +444,8 @@ def validate_highlight_regions(
     list[str]
         Subset of *regions* that exist in both *gdf* and *da*.
     """
-    gdf_names = set(gdf.index.astype(str))
-    bus_names = set(da.bus.values.astype(str))
+    gdf_names = set(gdf.index.astype(str).tolist())
+    bus_names = set(str(b) for b in da.bus.values)
 
     valid: list[str] = []
     for r in regions:
@@ -464,7 +466,17 @@ def validate_highlight_regions(
     if valid:
         log.info("Valid highlight regions (%s): %s", profile_label, valid)
     else:
-        log.warning("No valid highlight regions found for %s.", profile_label)
+        sample_gdf = sorted(gdf_names)[:10]
+        sample_buses = sorted(bus_names)[:10]
+        log.warning(
+            "No valid highlight regions found for %s. "
+            "Update HIGHLIGHT_REGIONS with names that exist in the data.\n"
+            "  First ≤10 GDF region names : %s\n"
+            "  First ≤10 profile bus names: %s",
+            profile_label,
+            sample_gdf,
+            sample_buses,
+        )
     return valid
 
 
@@ -798,14 +810,20 @@ def main() -> None:
 
     wind_highlight_regions: list[str] = []
     wind_highlight_series: pd.Series | None = None
-    if HIGHLIGHT_ENABLED and HIGHLIGHT_REGIONS:
-        wind_highlight_regions = validate_highlight_regions(
-            HIGHLIGHT_REGIONS, gdf, da_wind, "wind"
-        )
-        if wind_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
-            wind_highlight_series = compute_highlight_series(
-                da_wind, wind_highlight_regions
+    if HIGHLIGHT_ENABLED:
+        if not HIGHLIGHT_REGIONS:
+            log.warning(
+                "HIGHLIGHT_ENABLED is True but HIGHLIGHT_REGIONS is empty. "
+                "Set region names in HIGHLIGHT_REGIONS to activate the feature."
             )
+        else:
+            wind_highlight_regions = validate_highlight_regions(
+                HIGHLIGHT_REGIONS, gdf, da_wind, "wind"
+            )
+            if wind_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
+                wind_highlight_series = compute_highlight_series(
+                    da_wind, wind_highlight_regions
+                )
 
     animate_profile(
         da=da_wind,
@@ -827,14 +845,17 @@ def main() -> None:
 
     solar_highlight_regions: list[str] = []
     solar_highlight_series: pd.Series | None = None
-    if HIGHLIGHT_ENABLED and HIGHLIGHT_REGIONS:
-        solar_highlight_regions = validate_highlight_regions(
-            HIGHLIGHT_REGIONS, gdf, da_solar, "solar"
-        )
-        if solar_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
-            solar_highlight_series = compute_highlight_series(
-                da_solar, solar_highlight_regions
+    if HIGHLIGHT_ENABLED:
+        if not HIGHLIGHT_REGIONS:
+            pass  # warning already issued for wind above
+        else:
+            solar_highlight_regions = validate_highlight_regions(
+                HIGHLIGHT_REGIONS, gdf, da_solar, "solar"
             )
+            if solar_highlight_regions and HIGHLIGHT_TIMESERIES_ENABLED:
+                solar_highlight_series = compute_highlight_series(
+                    da_solar, solar_highlight_regions
+                )
 
     animate_profile(
         da=da_solar,
