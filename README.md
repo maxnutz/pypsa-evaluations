@@ -209,6 +209,11 @@ running:
 > [!TIP]
 > Be sure to read in the right Regions-File! The index of the Regions-file must match exactly to the Buses specified in the availability-files, so use file with **clustered** regions.
 
+#### Region highlighting
+Single or multiple regions can be highlighted (see Configuration variables above) and the mean availability profile for the respective region(s) is plotted as timeseries on the bottom of the animated map.
+
+<img src="pngs/wind_availability_small_area_at.gif" alt="GIF wind availability with highlight" width="800" />
+
 ### Requirements
 
 All required packages are declared in `pixi.toml` and installed by `pixi install`:
