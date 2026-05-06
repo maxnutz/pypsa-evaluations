@@ -31,7 +31,7 @@ SHOW_MAJOR_CITIES = False
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
 # Example: CARRIERS_FILTER = {"AC", "DC", "H2 pipeline"}
-CARRIERS_FILTER = ["AC", "DC"]
+CARRIERS_FILTER = None
 
 # Visual tuning.
 MAP_STYLE = "carto-positron"
@@ -39,8 +39,8 @@ PAPER_BG_COLOR = "rgba(238,242,247,0.27)"
 PLOT_BG_COLOR = "rgba(238,242,247,0.27)"
 EDGE_OPACITY = 0.42
 MIN_WIDTH = 1.8
-MAX_WIDTH = 13.0
-WIDTH_BUCKETS = 6
+MAX_WIDTH = 20.0
+WIDTH_BUCKETS = 100
 REGION_BORDER_COLOR = "rgba(100,116,139,0.4)"
 REGION_BORDER_WIDTH = 0.5
 COUNTRY_BORDER_COLOR = "rgba(24,36,58,0.9)"
@@ -51,7 +51,7 @@ CITY_TEXT_COLOR = "rgba(16,22,32,0.95)"
 # Routing/overlap reduction.
 CURVE_SAMPLES = 24
 PAIR_CURVATURE_FACTOR = 0.11
-CARRIER_CURVATURE_FACTOR = 0.018
+CARRIER_CURVATURE_FACTOR = 0.02
 
 TITLE = (
 	"<b>Brownfield Infrastructure 2025</b>"
@@ -380,25 +380,30 @@ def build_infrastructure_table(
 
 
 def add_region_layer(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	# Simplify geometries to reduce GeoJSON size while preserving visual appearance.
-	simplified = regions.copy()
-	simplified["geometry"] = simplified.geometry.simplify(tolerance=0.01, preserve_topology=True)
-	geojson_dict = json.loads(simplified.to_json())
-	regions_sorted = simplified.sort_values("name")
-	fig.add_trace(
-		go.Choroplethmapbox(
-			geojson=geojson_dict,
-			featureidkey="properties.name",
-			locations=regions_sorted["name"],
-			z=[1.0] * len(regions_sorted),
-			colorscale=[[0.0, "rgba(220,232,246,0.32)"], [1.0, "rgba(220,232,246,0.32)"]],
-			marker_line_width=REGION_BORDER_WIDTH,
-			marker_line_color=REGION_BORDER_COLOR,
-			showscale=False,
-			hovertemplate="<b>%{location}</b><extra></extra>",
-			name="Regions",
-		)
-	)
+    # Simplify geometries to reduce GeoJSON size while preserving visual appearance.
+    simplified = regions.copy()
+    simplified["geometry"] = simplified.geometry.simplify(
+        tolerance=0.01, preserve_topology=True
+    )
+    geojson_dict = json.loads(simplified.to_json())
+    regions_sorted = simplified.sort_values("name")
+    fig.add_trace(
+        go.Choroplethmapbox(
+            geojson=geojson_dict,
+            featureidkey="properties.name",
+            locations=regions_sorted["name"],
+            z=[1.0] * len(regions_sorted),
+            colorscale=[
+                [0.0, "rgba(220,232,246,0.32)"],
+                [1.0, "rgba(220,232,246,0.32)"],
+            ],
+            marker_line_width=REGION_BORDER_WIDTH,
+            marker_line_color=REGION_BORDER_COLOR,
+            showscale=False,
+            hoverinfo="skip",
+            name="Regions",
+        )
+    )
 
 
 def add_country_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
