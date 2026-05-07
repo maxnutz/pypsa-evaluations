@@ -40,7 +40,6 @@ PLOT_BG_COLOR = "rgba(238,242,247,0.27)"
 EDGE_OPACITY = 0.42
 MIN_WIDTH = 1.8
 MAX_WIDTH = 50.0  # 80.0
-WIDTH_BUCKETS = 10
 REGION_BORDER_COLOR = "rgba(100,116,139,0.4)"
 REGION_BORDER_WIDTH = 0.5
 COUNTRY_BORDER_COLOR = "rgba(24,36,58,0.9)"
@@ -49,9 +48,9 @@ CITY_MARKER_COLOR = "rgba(20,20,25,0.88)"
 CITY_TEXT_COLOR = "rgba(16,22,32,0.95)"
 
 # Routing/overlap reduction.
-CURVE_SAMPLES = 24
+CURVE_SAMPLES = 20
 PAIR_CURVATURE_FACTOR = 0.11
-CARRIER_CURVATURE_FACTOR = 0.2
+CARRIER_CURVATURE_FACTOR = 0.0
 
 TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
 
@@ -447,21 +446,6 @@ def build_infrastructure_table(
         lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
     )
 
-    # if WIDTH_BUCKETS <= 1:
-    #     table["width_bucket"] = 0
-    #     table["width_bucket_px"] = (MIN_WIDTH + MAX_WIDTH) / 2.0
-    # else:
-    #     scaled = (table["width_px"] - MIN_WIDTH) / (MAX_WIDTH - MIN_WIDTH)
-    #     table["width_bucket"] = (scaled * (WIDTH_BUCKETS - 1)).round().astype(int)
-    #     table["width_bucket_px"] = MIN_WIDTH + (
-    #         table["width_bucket"] * (MAX_WIDTH - MIN_WIDTH) / (WIDTH_BUCKETS - 1)
-    #     )
-
-    max_gw = table["capacity_mw"].max()
-    table["width_bucket"] = (table["capacity_mw"] / max_gw * MAX_WIDTH) + MIN_WIDTH
-
-    table["width_bucket_px"] = table["width_bucket"]
-
     table["curvature"] = 0.0
     for pair_key, pair_index in table.groupby("pair_key").groups.items():
         idx = list(pair_index)
@@ -597,10 +581,6 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
                     float(row.curvature),
                     CURVE_SAMPLES,
                 )
-                all_lon.extend(lon)
-                all_lon.append(None)
-                all_lat.extend(lat)
-                all_lat.append(None)
                 mid = len(lon) // 2
                 hover_lon.append(lon[mid])
                 hover_lat.append(lat[mid])
@@ -611,17 +591,23 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
                     f"<br>Capacity: {cap_gw:.2f} GW"
                 )
 
-            # Representative line width: median of the bucket widths for this carrier.
-            # med_width = float(group["width_bucket_px"].median())
             color = color_map.get(str(carrier), "#334155")
             isfirst = True
-            for index, line in group.iterrows():
+            for row in group.itertuples(index=False):
+                lon, lat = curved_path(
+                    float(row.from_lon),
+                    float(row.from_lat),
+                    float(row.to_lon),
+                    float(row.to_lat),
+                    float(row.curvature),
+                    CURVE_SAMPLES,
+                )
                 fig.add_trace(
                     go.Scattermapbox(
-                        lon=[line.from_lon, line.to_lon],
-                        lat=[line.from_lat, line.to_lat],
+                        lon=lon,
+                        lat=lat,
                         mode="lines",
-                        line={"width": line.width_bucket_px, "color": color},
+                        line={"width": row.width_px, "color": color},
                         opacity=EDGE_OPACITY,
                         name=str(carrier),
                         legendgroup=f"carrier::{carrier}",
