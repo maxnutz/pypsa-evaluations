@@ -14,11 +14,11 @@ import pypsa
 # Configuration - set values directly in this script (no CLI parser)
 # ---------------------------------------------------------------------------
 
-NETWORK_PATH = Path("/home/maxnutz/Documents/evaluations/base_s_adm__none_2025_brownfield.nc")
+NETWORK_PATH = Path("/home/maxnutz/Documents/evaluations/base_s_adm__none_2025.nc")
 REGIONS_PATH = Path("resources/regions_onshore.geojson")
 FALLBACK_REGIONS_PATH = Path("resources/regions_onshore_base_s_adm.geojson")
 
-OUTPUT_HTML = Path("outputs/brownfield_infrastructure_ac_dc.html")
+OUTPUT_HTML = Path("outputs/brownfield_infrastructure_map.html")
 OUTPUT_STATIC = Path("outputs/brownfield_infrastructure_map.svg")
 
 # Set to two-letter country code like "AT" for country focus, or None for all.
@@ -31,7 +31,7 @@ SHOW_MAJOR_CITIES = False
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
 # Example: CARRIERS_FILTER = {"AC", "DC", "H2 pipeline"}
-CARRIERS_FILTER = ["AC", "DC"]
+CARRIERS_FILTER = None
 
 # Visual tuning.
 MAP_STYLE = "carto-positron"
@@ -39,9 +39,8 @@ PAPER_BG_COLOR = "rgba(238,242,247,0.27)"
 PLOT_BG_COLOR = "rgba(238,242,247,0.27)"
 EDGE_OPACITY = 0.42
 MIN_WIDTH = 1.8
-MAX_WIDTH = 13.0
-WIDTH_BUCKETS = 6
-REGION_OUTLINE_COLOR = "rgba(245,248,252,0.95)"
+MAX_WIDTH = 50.0  # 80.0
+WIDTH_BUCKETS = 10
 REGION_BORDER_COLOR = "rgba(100,116,139,0.4)"
 REGION_BORDER_WIDTH = 0.5
 COUNTRY_BORDER_COLOR = "rgba(24,36,58,0.9)"
@@ -52,23 +51,20 @@ CITY_TEXT_COLOR = "rgba(16,22,32,0.95)"
 # Routing/overlap reduction.
 CURVE_SAMPLES = 24
 PAIR_CURVATURE_FACTOR = 0.11
-CARRIER_CURVATURE_FACTOR = 0.018
+CARRIER_CURVATURE_FACTOR = 0.2
 
-TITLE = (
-	"<b>Brownfield Infrastructure 2025</b>"
-	"<br><sup>PyPSA energy system | electricity transmission</sup>"
-)
+TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
 
 COLOR_DICT = {
-	"AC": "#120ee7",
-	"DC": "#9467bd",
-	"gas pipeline": "#ff7f0e",
-	"gas pipeline new": "#ffbb78",
-	"H2 pipeline retrofitted": "#47e9e1",
-	"H2 pipeline": "#1acac1",
-	"solid biomass transport": "#2ca02c",
-	"municipal solid waste transport": "#98df8a",
-	"CO2 pipeline": "#7f7f7f",
+    "AC": "#3964F5",
+    "DC": "#480058",
+    "gas pipeline": "#FFA213",
+    "gas pipeline new": "#B47C14",
+    "H2 pipeline retrofitted": "#35BFA0",
+    "H2 pipeline": "#6DEEC9",
+    "solid biomass transport": "#8DED71",
+    "municipal solid waste transport": "#5C6E5F",
+    "CO2 pipeline": "#7f7f7f",
 }
 
 EXCLUDED_CARRIERS = {
@@ -184,59 +180,99 @@ def edge_width(value: float, min_v: float, max_v: float, min_w: float, max_w: fl
 
 
 def generate_color_map(carriers: list[str]) -> dict[str, str]:
-	palette = [
-		"#06b6d4", "#8b5cf6", "#f43f5e", "#84cc16", "#f59e0b", "#3b82f6",
-		"#10b981", "#ef4444", "#14b8a6", "#e879f9", "#f97316", "#22c55e",
-	]
-	unique = sorted({carrier for carrier in carriers if carrier})
-	result: dict[str, str] = {}
-	index = 0
-	for carrier in unique:
-		if carrier in COLOR_DICT:
-			result[carrier] = COLOR_DICT[carrier]
-		else:
-			result[carrier] = palette[index % len(palette)]
-			index += 1
-	return result
+    palette = [
+        "#06b6d4",
+        "#8b5cf6",
+        "#f43f5e",
+        "#84cc16",
+        "#f59e0b",
+        "#3b82f6",
+        "#10b981",
+        "#ef4444",
+        "#14b8a6",
+        "#e879f9",
+        "#f97316",
+        "#22c55e",
+    ]
+    unique = sorted({carrier for carrier in carriers if carrier})
+    result: dict[str, str] = {}
+    index = 0
+    for carrier in unique:
+        if carrier in COLOR_DICT:
+            result[carrier] = COLOR_DICT[carrier]
+        else:
+            result[carrier] = palette[index % len(palette)]
+            index += 1
+    return result
 
 
-def extract_region_connecting_links(nw: pypsa.Network) -> pd.DataFrame:
-	region_connecting_links = nw.links.loc[
-		(nw.links.bus0.map(nw.buses.location) != nw.links.bus1.map(nw.buses.location))
-		& (nw.links.bus0.map(nw.buses.location) != "EU")
-		& (nw.links.bus1.map(nw.buses.location) != "EU")
-	].copy()
-	region_connecting_links["from_region"] = region_connecting_links.bus0.map(nw.buses.location).map(normalize_region_name)
-	region_connecting_links["to_region"] = region_connecting_links.bus1.map(nw.buses.location).map(normalize_region_name)
-	region_connecting_links["component"] = "link"
-	region_connecting_links["capacity_mw"] = pd.to_numeric(region_connecting_links["p_nom"], errors="coerce").fillna(0.0)
-	region_connecting_links["carrier"] = region_connecting_links["carrier"].astype(str)
-	
-	# Group links by carrier, bus0, and bus1, summing capacities
-	if not region_connecting_links.empty:
-		region_connecting_links = region_connecting_links.groupby(
-			["carrier", "bus0", "bus1", "from_region", "to_region", "component"],
-			as_index=False
-		).agg({"capacity_mw": "sum"})
-	
-	return region_connecting_links
+def extract_geographical_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
+    """
+    Extract geographical infrastructure (links and lines connecting different regions)
+    using PyPSA statistics for efficient aggregation.
+    """
+    # Get aggregated capacities for all links and lines grouped by bus0, bus1, carrier
+    all_links = (
+        nw.statistics.installed_capacity(
+            components=["Link", "Line"], groupby=["bus0", "bus1", "carrier"]
+        )
+        .to_frame(name="capacity_mw")
+        .reset_index()
+    )
 
+    # Map bus locations WITHOUT normalizing yet - keep original location names
+    all_links["location_bus0"] = all_links["bus0"].map(nw.buses.location)
+    all_links["location_bus1"] = all_links["bus1"].map(nw.buses.location)
 
-def extract_region_connecting_lines(nw: pypsa.Network) -> pd.DataFrame:
-	region_connecting_lines = nw.lines.loc[
-		(nw.lines.bus0.map(nw.buses.location) != nw.lines.bus1.map(nw.buses.location))
-		& (nw.lines.bus0.map(nw.buses.location) != "EU")
-		& (nw.lines.bus1.map(nw.buses.location) != "EU")
-	].copy()
-	region_connecting_lines["from_region"] = region_connecting_lines.bus0.map(nw.buses.location).map(normalize_region_name)
-	region_connecting_lines["to_region"] = region_connecting_lines.bus1.map(nw.buses.location).map(normalize_region_name)
-	region_connecting_lines["component"] = "line"
-	region_connecting_lines["capacity_mw"] = pd.to_numeric(region_connecting_lines["s_nom"], errors="coerce").fillna(0.0)
-	if "carrier" in region_connecting_lines.columns:
-		region_connecting_lines["carrier"] = region_connecting_lines["carrier"].astype(str)
-	else:
-		region_connecting_lines["carrier"] = "AC"
-	return region_connecting_lines
+    # Filter to only geographical links (different locations, excluding EU)
+    geographical_links = all_links[
+        (all_links["location_bus0"] != all_links["location_bus1"])
+        & (all_links["location_bus0"] != "EU")
+        & (all_links["location_bus1"] != "EU")
+    ].copy()
+
+    if geographical_links.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
+
+    # Use location as region name directly (don't normalize)
+    geographical_links["from_region"] = geographical_links["location_bus0"]
+    geographical_links["to_region"] = geographical_links["location_bus1"]
+    geographical_links["carrier"] = geographical_links["carrier"].astype(str)
+
+    # Determine component type (Link or Line) by checking original components
+    # Create a set of (bus0, bus1) pairs that exist as links
+    link_pairs = set(zip(nw.links["bus0"], nw.links["bus1"]))
+
+    def get_component_type(row):
+        bus_pair = (row["bus0"], row["bus1"])
+        return "link" if bus_pair in link_pairs else "line"
+
+    geographical_links["component"] = geographical_links.apply(
+        get_component_type, axis=1
+    )
+
+    # Select and reorder columns to match expected format
+    return geographical_links[
+        [
+            "bus0",
+            "bus1",
+            "carrier",
+            "capacity_mw",
+            "from_region",
+            "to_region",
+            "component",
+        ]
+    ]
 
 
 def filter_infrastructure_by_regions(
@@ -245,29 +281,37 @@ def filter_infrastructure_by_regions(
 	country_only: str | None,
 	carriers_filter: set[str] | None = None,
 ) -> pd.DataFrame:
-	if components.empty:
-		return components
+    if components.empty:
+        return components
 
-	filtered = components[
-		components["from_region"].isin(valid_regions)
-		& components["to_region"].isin(valid_regions)
-		& components["from_region"].ne(components["to_region"])
-		& components["capacity_mw"].gt(0.0)
-	].copy()
+    # Create a function to check if a region is valid
+    # It handles both direct matches and prefix matches (e.g., 'FR' matches 'FR0', 'FR1')
+    def is_valid_region(region):
+        if region in valid_regions:
+            return True
+        # Check if any valid region starts with this region (e.g., 'FR' matches 'FR0', 'FR1')
+        return any(vr.startswith(region) for vr in valid_regions)
 
-	if country_only:
-		country = country_only.upper()
-		filtered = filtered[
-			filtered["from_region"].str.startswith(country)
-			& filtered["to_region"].str.startswith(country)
-		].copy()
+    filtered = components[
+        components["from_region"].apply(is_valid_region)
+        & components["to_region"].apply(is_valid_region)
+        & components["from_region"].ne(components["to_region"])
+        & components["capacity_mw"].gt(0.0)
+    ].copy()
 
-	if "carrier" in filtered.columns:
-		filtered = filtered[~filtered["carrier"].isin(EXCLUDED_CARRIERS)].copy()
-		# Apply user-defined carrier filter if specified
-		if carriers_filter is not None:
-			filtered = filtered[filtered["carrier"].isin(carriers_filter)].copy()
-	return filtered
+    if country_only:
+        country = country_only.upper()
+        filtered = filtered[
+            filtered["from_region"].str.startswith(country)
+            & filtered["to_region"].str.startswith(country)
+        ].copy()
+
+    if "carrier" in filtered.columns:
+        filtered = filtered[~filtered["carrier"].isin(EXCLUDED_CARRIERS)].copy()
+        # Apply user-defined carrier filter if specified
+        if carriers_filter is not None:
+            filtered = filtered[filtered["carrier"].isin(carriers_filter)].copy()
+    return filtered
 
 
 def curved_path(
@@ -312,96 +356,172 @@ def build_infrastructure_table(
 	country_only: str | None,
 	carriers_filter: set[str] | None = None,
 ) -> pd.DataFrame:
-	parts: list[pd.DataFrame] = []
-	if PLOT_LINKS:
-		parts.append(extract_region_connecting_links(nw))
-	if PLOT_LINES:
-		parts.append(extract_region_connecting_lines(nw))
-	if not parts:
-		return pd.DataFrame()
+    # Extract geographical infrastructure using PyPSA statistics (includes both links and lines)
+    table = extract_geographical_infrastructure(nw)
 
-	table = pd.concat(parts, ignore_index=True)
-	table = filter_infrastructure_by_regions(table, valid_regions, country_only, carriers_filter)
-	if table.empty:
-		return table
+    if table.empty:
+        return pd.DataFrame()
 
-	table["from_lon"] = table["from_region"].map(centers["lon"])
-	table["from_lat"] = table["from_region"].map(centers["lat"])
-	table["to_lon"] = table["to_region"].map(centers["lon"])
-	table["to_lat"] = table["to_region"].map(centers["lat"])
-	table = table.dropna(subset=["from_lon", "from_lat", "to_lon", "to_lat"]).copy()
+    # Filter to only requested component types
+    if PLOT_LINKS and PLOT_LINES:
+        pass  # Keep both links and lines
+    elif PLOT_LINKS:
+        table = table[table["component"] == "link"].copy()
+    elif PLOT_LINES:
+        table = table[table["component"] == "line"].copy()
+    else:
+        return pd.DataFrame()
 
-	table["pair_key"] = table["from_region"].where(
-		table["from_region"] <= table["to_region"],
-		table["to_region"],
-	) + "|" + table["to_region"].where(
-		table["from_region"] <= table["to_region"],
-		table["from_region"],
-	)
+    if table.empty:
+        return pd.DataFrame()
 
-	table = table.sort_values(
-		["pair_key", "carrier", "capacity_mw"],
-		ascending=[True, True, False],
-		kind="stable",
-	).reset_index(drop=True)
+    table = filter_infrastructure_by_regions(
+        table, valid_regions, country_only, carriers_filter
+    )
+    if table.empty:
+        return table
 
-	min_cap = float(table["capacity_mw"].min())
-	max_cap = float(table["capacity_mw"].max())
-	table["width_px"] = table["capacity_mw"].map(
-		lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
-	)
+    # Create a mapping from network region codes (e.g., 'FR') to GeoJSON region names (e.g., 'FR0')
+    # For aggregated regions, use the first matching subdivided region
+    network_to_geojson = {}
+    for region in table["from_region"].unique():
+        if region in centers.index:
+            network_to_geojson[region] = region
+        else:
+            # Find first matching region that starts with this code
+            matching = [r for r in centers.index if r.startswith(region)]
+            if matching:
+                network_to_geojson[region] = sorted(matching)[0]
 
-	if WIDTH_BUCKETS <= 1:
-		table["width_bucket"] = 0
-		table["width_bucket_px"] = (MIN_WIDTH + MAX_WIDTH) / 2.0
-	else:
-		scaled = (table["width_px"] - MIN_WIDTH) / (MAX_WIDTH - MIN_WIDTH)
-		table["width_bucket"] = (scaled * (WIDTH_BUCKETS - 1)).round().astype(int)
-		table["width_bucket_px"] = MIN_WIDTH + (
-			table["width_bucket"] * (MAX_WIDTH - MIN_WIDTH) / (WIDTH_BUCKETS - 1)
-		)
+    # Apply the mapping
+    table["mapped_from"] = table["from_region"].map(network_to_geojson)
+    table["mapped_to"] = table["to_region"].map(network_to_geojson)
 
-	table["curvature"] = 0.0
-	for pair_key, pair_index in table.groupby("pair_key").groups.items():
-		idx = list(pair_index)
-		n = len(idx)
-		if n == 1:
-			table.loc[idx, "curvature"] = 0.0
-			continue
+    # Drop rows where mapping failed
+    table = table.dropna(subset=["mapped_from", "mapped_to"]).copy()
 
-		row = table.loc[idx[0]]
-		mean_lat = math.radians((float(row["from_lat"]) + float(row["to_lat"])) / 2.0)
-		lon_scale = max(math.cos(mean_lat), 0.2)
-		dist = math.hypot((float(row["to_lon"]) - float(row["from_lon"])) * lon_scale, float(row["to_lat"]) - float(row["from_lat"]))
-		base = max(0.025, dist * PAIR_CURVATURE_FACTOR)
-		offsets = [((k - (n - 1) / 2.0) * base * CARRIER_CURVATURE_FACTOR * 10.0) for k in range(n)]
-		table.loc[idx, "curvature"] = offsets
+    table["from_lon"] = table["mapped_from"].map(centers["lon"])
+    table["from_lat"] = table["mapped_from"].map(centers["lat"])
+    table["to_lon"] = table["mapped_to"].map(centers["lon"])
+    table["to_lat"] = table["mapped_to"].map(centers["lat"])
+    table = table.dropna(subset=["from_lon", "from_lat", "to_lon", "to_lat"]).copy()
 
-	return table
+    # Sum capacities for all connections between same region pair and carrier
+    table = table.groupby(
+        ["from_region", "to_region", "carrier"],
+        as_index=False,
+    ).agg(
+        {
+            "component": "first",
+            "bus0": "first",
+            "bus1": "first",
+            "capacity_mw": "sum",
+            "from_lon": "first",
+            "from_lat": "first",
+            "to_lon": "first",
+            "to_lat": "first",
+        }
+    )
 
+    table["pair_key"] = (
+        table["from_region"].where(
+            table["from_region"] <= table["to_region"],
+            table["to_region"],
+        )
+        + "|"
+        + table["to_region"].where(
+            table["from_region"] <= table["to_region"],
+            table["from_region"],
+        )
+    )
+
+    table = table.sort_values(
+        ["pair_key", "carrier", "capacity_mw"],
+        ascending=[True, True, False],
+        kind="stable",
+    ).reset_index(drop=True)
+
+    min_cap = float(table["capacity_mw"].min())
+    max_cap = float(table["capacity_mw"].max())
+    table["width_px"] = table["capacity_mw"].map(
+        lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
+    )
+
+    # if WIDTH_BUCKETS <= 1:
+    #     table["width_bucket"] = 0
+    #     table["width_bucket_px"] = (MIN_WIDTH + MAX_WIDTH) / 2.0
+    # else:
+    #     scaled = (table["width_px"] - MIN_WIDTH) / (MAX_WIDTH - MIN_WIDTH)
+    #     table["width_bucket"] = (scaled * (WIDTH_BUCKETS - 1)).round().astype(int)
+    #     table["width_bucket_px"] = MIN_WIDTH + (
+    #         table["width_bucket"] * (MAX_WIDTH - MIN_WIDTH) / (WIDTH_BUCKETS - 1)
+    #     )
+
+    max_gw = table["capacity_mw"].max()
+    table["width_bucket"] = (table["capacity_mw"] / max_gw * MAX_WIDTH) + MIN_WIDTH
+
+    table["width_bucket_px"] = table["width_bucket"]
+
+    table["curvature"] = 0.0
+    for pair_key, pair_index in table.groupby("pair_key").groups.items():
+        idx = list(pair_index)
+        n = len(idx)
+        if n == 1:
+            table.loc[idx, "curvature"] = 0.0
+            continue
+
+        row = table.loc[idx[0]]
+        mean_lat = math.radians((float(row["from_lat"]) + float(row["to_lat"])) / 2.0)
+        lon_scale = max(math.cos(mean_lat), 0.2)
+        dist = math.hypot(
+            (float(row["to_lon"]) - float(row["from_lon"])) * lon_scale,
+            float(row["to_lat"]) - float(row["from_lat"]),
+        )
+        base = max(0.025, dist * PAIR_CURVATURE_FACTOR)
+        offsets = [
+            ((k - (n - 1) / 2.0) * base * CARRIER_CURVATURE_FACTOR * 10.0)
+            for k in range(n)
+        ]
+        table.loc[idx, "curvature"] = offsets
+
+    return table
 
 def add_region_layer(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	geojson_dict = json.loads(regions.to_json())
-	regions_sorted = regions.sort_values("name")
-	fig.add_trace(
-		go.Choroplethmapbox(
-			geojson=geojson_dict,
-			featureidkey="properties.name",
-			locations=regions_sorted["name"],
-			z=[1.0] * len(regions_sorted),
-			colorscale=[[0.0, "rgba(220,232,246,0.32)"], [1.0, "rgba(220,232,246,0.32)"]],
-			marker_line_width=0.55,
-			marker_line_color=REGION_OUTLINE_COLOR,
-			showscale=False,
-			hovertemplate="<b>%{location}</b><extra></extra>",
-			name="Regions",
-		)
-	)
+    # Simplify geometries to reduce GeoJSON size while preserving visual appearance.
+    simplified = regions.copy()
+    simplified["geometry"] = simplified.geometry.simplify(
+        tolerance=0.01, preserve_topology=True
+    )
+    geojson_dict = json.loads(simplified.to_json())
+    regions_sorted = simplified.sort_values("name")
+    fig.add_trace(
+        go.Choroplethmapbox(
+            geojson=geojson_dict,
+            featureidkey="properties.name",
+            locations=regions_sorted["name"],
+            z=[1.0] * len(regions_sorted),
+            colorscale=[
+                [0.0, "rgba(220,232,246,0.32)"],
+                [1.0, "rgba(220,232,246,0.32)"],
+            ],
+            marker_line_width=REGION_BORDER_WIDTH,
+            marker_line_color=REGION_BORDER_COLOR,
+            showscale=False,
+            hoverinfo="skip",
+            name="Regions",
+        )
+    )
 
 
 def add_country_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	borders = regions.dissolve(by="country").geometry.boundary
-	show_legend = False
+	# Dissolve by country and simplify before extracting borders.
+	country_geoms = regions.dissolve(by="country")
+	country_geoms["geometry"] = country_geoms.geometry.simplify(tolerance=0.01, preserve_topology=True)
+	borders = country_geoms.geometry.boundary
+
+	# Collect all segments into a single trace, separated by None.
+	all_lons: list[float | None] = []
+	all_lats: list[float | None] = []
 	for border in borders:
 		if border.is_empty:
 			continue
@@ -410,50 +530,24 @@ def add_country_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
 			coords = list(line.coords)
 			if len(coords) < 2:
 				continue
-			lons = [c[0] for c in coords]
-			lats = [c[1] for c in coords]
-			fig.add_trace(
-				go.Scattermapbox(
-					lon=lons,
-					lat=lats,
-					mode="lines",
-					line={"width": COUNTRY_BORDER_WIDTH, "color": COUNTRY_BORDER_COLOR},
-					hoverinfo="skip",
-					name="Country borders",
-					legendgroup="country-borders",
-					showlegend=show_legend,
-				)
-			)
-			show_legend = False
+			all_lons.extend(c[0] for c in coords)
+			all_lons.append(None)
+			all_lats.extend(c[1] for c in coords)
+			all_lats.append(None)
 
-
-def add_region_borders(fig: go.Figure, regions: gpd.GeoDataFrame) -> None:
-	"""Display individual region boundaries on the map."""
-	show_legend = False
-	for _, region in regions.iterrows():
-		boundary = region.geometry.boundary
-		if boundary.is_empty:
-			continue
-		lines = list(boundary.geoms) if boundary.geom_type == "MultiLineString" else [boundary]
-		for line in lines:
-			coords = list(line.coords)
-			if len(coords) < 2:
-				continue
-			lons = [c[0] for c in coords]
-			lats = [c[1] for c in coords]
-			fig.add_trace(
-				go.Scattermapbox(
-					lon=lons,
-					lat=lats,
-					mode="lines",
-					line={"width": REGION_BORDER_WIDTH, "color": REGION_BORDER_COLOR},
-					hoverinfo="skip",
-					name="Region borders",
-					legendgroup="region-borders",
-					showlegend=show_legend,
-				)
+	if all_lons:
+		fig.add_trace(
+			go.Scattermapbox(
+				lon=all_lons,
+				lat=all_lats,
+				mode="lines",
+				line={"width": COUNTRY_BORDER_WIDTH, "color": COUNTRY_BORDER_COLOR},
+				hoverinfo="skip",
+				name="Country borders",
+				legendgroup="country-borders",
+				showlegend=False,
 			)
-			show_legend = False
+		)
 
 
 def add_city_layer(fig: go.Figure, country_only: str | None) -> None:
@@ -482,42 +576,75 @@ def add_city_layer(fig: go.Figure, country_only: str | None) -> None:
 
 
 def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: dict[str, str]) -> None:
-	shown: set[str] = set()
-	grouped = infra.groupby(["carrier", "width_bucket", "width_bucket_px"], sort=False)
+    # Plot links first, then lines. Within each component type, group by carrier.
+    # Hover markers are placed at mid-points so capacity info is accessible.
+    for component_type in ["link", "line"]:
+        component_data = infra[infra["component"] == component_type]
 
-	for (carrier, _, width_bucket_px), group in grouped:
-		all_lon: list[float | None] = []
-		all_lat: list[float | None] = []
-		for row in group.itertuples(index=False):
-			lon, lat = curved_path(
-				float(row.from_lon),
-				float(row.from_lat),
-				float(row.to_lon),
-				float(row.to_lat),
-				float(row.curvature),
-				CURVE_SAMPLES,
-			)
-			all_lon.extend(lon)
-			all_lon.append(None)
-			all_lat.extend(lat)
-			all_lat.append(None)
+        for carrier, group in component_data.groupby("carrier", sort=False):
+            all_lon: list[float | None] = []
+            all_lat: list[float | None] = []
+            hover_lon: list[float] = []
+            hover_lat: list[float] = []
+            hover_text: list[str] = []
 
-		show = str(carrier) not in shown
-		shown.add(str(carrier))
+            for row in group.itertuples(index=False):
+                lon, lat = curved_path(
+                    float(row.from_lon),
+                    float(row.from_lat),
+                    float(row.to_lon),
+                    float(row.to_lat),
+                    float(row.curvature),
+                    CURVE_SAMPLES,
+                )
+                all_lon.extend(lon)
+                all_lon.append(None)
+                all_lat.extend(lat)
+                all_lat.append(None)
+                mid = len(lon) // 2
+                hover_lon.append(lon[mid])
+                hover_lat.append(lat[mid])
+                cap_gw = float(row.capacity_mw) / 1000.0
+                hover_text.append(
+                    f"<b>{row.from_region} → {row.to_region}</b>"
+                    f"<br>Carrier: {carrier}"
+                    f"<br>Capacity: {cap_gw:.2f} GW"
+                )
 
-		fig.add_trace(
-			go.Scattermapbox(
-				lon=all_lon,
-				lat=all_lat,
-				mode="lines",
-				line={"width": float(width_bucket_px), "color": color_map.get(str(carrier), "#334155")},
-				opacity=EDGE_OPACITY,
-				name=str(carrier),
-				legendgroup=f"carrier::{carrier}",
-				showlegend=show,
-				hovertemplate=f"Carrier: {carrier}<extra></extra>",
-			)
-		)
+            # Representative line width: median of the bucket widths for this carrier.
+            # med_width = float(group["width_bucket_px"].median())
+            color = color_map.get(str(carrier), "#334155")
+            isfirst = True
+            for index, line in group.iterrows():
+                fig.add_trace(
+                    go.Scattermapbox(
+                        lon=[line.from_lon, line.to_lon],
+                        lat=[line.from_lat, line.to_lat],
+                        mode="lines",
+                        line={"width": line.width_bucket_px, "color": color},
+                        opacity=EDGE_OPACITY,
+                        name=str(carrier),
+                        legendgroup=f"carrier::{carrier}",
+                        showlegend=isfirst,
+                        hoverinfo="skip",
+                    )
+                )
+                isfirst = False
+
+            # Invisible hover markers at segment mid-points (no extra visual clutter).
+            fig.add_trace(
+                go.Scattermapbox(
+                    lon=hover_lon,
+                    lat=hover_lat,
+                    mode="markers",
+                    marker={"size": 8, "opacity": 0.0, "color": color},
+                    text=hover_text,
+                    hovertemplate="%{text}<extra></extra>",
+                    name=str(carrier),
+                    legendgroup=f"carrier::{carrier}",
+                    showlegend=False,
+                )
+            )
 
 
 def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
@@ -551,44 +678,47 @@ def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
 
 
 def build_figure(regions: gpd.GeoDataFrame, infra: pd.DataFrame, country_only: str | None) -> go.Figure:
-	fig = go.Figure()
+    fig = go.Figure()
 
-	color_map = generate_color_map(infra["carrier"].astype(str).tolist()) if not infra.empty else {}
-	add_region_layer(fig, regions)
-	add_region_borders(fig, regions)
-	add_country_borders(fig, regions)
-	if not infra.empty:
-		add_infrastructure_layers(fig, infra, color_map)
-		add_capacity_scale_legend(fig, infra)
-	add_city_layer(fig, country_only)
+    color_map = (
+        generate_color_map(infra["carrier"].astype(str).tolist())
+        if not infra.empty
+        else {}
+    )
+    add_region_layer(fig, regions)
+    add_country_borders(fig, regions)
+    if not infra.empty:
+        add_infrastructure_layers(fig, infra, color_map)
+        add_capacity_scale_legend(fig, infra)
+    add_city_layer(fig, country_only)
 
-	minx, miny, maxx, maxy = regions.total_bounds
-	center = {"lon": float((minx + maxx) / 2.0), "lat": float((miny + maxy) / 2.0)}
+    minx, miny, maxx, maxy = regions.total_bounds
+    center = {"lon": float((minx + maxx) / 2.0), "lat": float((miny + maxy) / 2.0)}
 
-	lon_span = max(maxx - minx, 1.0)
-	zoom = 5.2 - math.log(lon_span, 2)
-	zoom = max(3.2, min(6.8, zoom))
+    lon_span = max(maxx - minx, 1.0)
+    zoom = 5.2 - math.log(lon_span, 2)
+    zoom = max(3.2, min(6.8, zoom))
 
-	fig.update_layout(
-		title={"text": TITLE, "x": 0.5, "xanchor": "center", "font": {"size": 28}},
-		mapbox={"style": MAP_STYLE, "center": center, "zoom": zoom},
-		paper_bgcolor=PAPER_BG_COLOR,
-		plot_bgcolor=PLOT_BG_COLOR,
-		margin={"l": 6, "r": 6, "t": 90, "b": 6},
-		legend={
-			"title": {"text": "Carriers & overlays", "font": {"size": 16}},
-			"bgcolor": "rgba(255,255,255,0.82)",
-			"font": {"size": 13},
-			"x": 0.01,
-			"y": 0.99,
-			"xanchor": "left",
-			"yanchor": "top",
-			"bordercolor": "rgba(148,163,184,0.35)",
-			"borderwidth": 1,
-		},
-	)
+    fig.update_layout(
+        title={"text": TITLE, "x": 0.5, "xanchor": "center", "font": {"size": 28}},
+        mapbox={"style": MAP_STYLE, "center": center, "zoom": zoom},
+        paper_bgcolor=PAPER_BG_COLOR,
+        plot_bgcolor=PLOT_BG_COLOR,
+        margin={"l": 6, "r": 6, "t": 90, "b": 6},
+        legend={
+            "title": {"text": "Carriers", "font": {"size": 16}},
+            "bgcolor": "rgba(255,255,255,0.82)",
+            "font": {"size": 13},
+            "x": 0.01,
+            "y": 0.99,
+            "xanchor": "left",
+            "yanchor": "top",
+            "bordercolor": "rgba(148,163,184,0.35)",
+            "borderwidth": 1,
+        },
+    )
 
-	return fig
+    return fig
 
 
 def export_static_matplotlib(
@@ -678,23 +808,31 @@ def export_figure(
 	color_map: dict[str, str],
 	country_only: str | None,
 ) -> None:
-	output_html.parent.mkdir(parents=True, exist_ok=True)
-	output_static.parent.mkdir(parents=True, exist_ok=True)
+    output_html.parent.mkdir(parents=True, exist_ok=True)
+    output_static.parent.mkdir(parents=True, exist_ok=True)
 
-	fig.write_html(output_html, include_plotlyjs="cdn")
-	print(f"[DONE] HTML export: {output_html}")
+    fig.write_html(
+        output_html,
+        include_plotlyjs="cdn",
+        config={"scrollZoom": True, "displayModeBar": True},
+    )
+    print(f"[DONE] HTML export: {output_html}")
 
-	try:
-		fig.write_image(output_static)
-		print(f"[DONE] Static export: {output_static}")
-	except Exception as exc:
-		try:
-			export_static_matplotlib(regions, infra, color_map, output_static, country_only)
-			print(f"[WARN] Plotly static export failed, used matplotlib fallback. Error: {exc}")
-		except Exception as fallback_exc:
-			print("[WARN] Static export failed in both Plotly and matplotlib fallback.")
-			print(f"[WARN] Plotly export error: {exc}")
-			print(f"[WARN] Matplotlib fallback error: {fallback_exc}")
+    try:
+        fig.write_image(output_static)
+        print(f"[DONE] Static export: {output_static}")
+    except Exception as exc:
+        try:
+            export_static_matplotlib(
+                regions, infra, color_map, output_static, country_only
+            )
+            print(
+                f"[WARN] Plotly static export failed, used matplotlib fallback. Error: {exc}"
+            )
+        except Exception as fallback_exc:
+            print("[WARN] Static export failed in both Plotly and matplotlib fallback.")
+            print(f"[WARN] Plotly export error: {exc}")
+            print(f"[WARN] Matplotlib fallback error: {fallback_exc}")
 
 
 def main() -> None:
