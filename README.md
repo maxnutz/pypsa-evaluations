@@ -3,6 +3,7 @@ This repository is a collection of various specific evaluations of pypsa-network
 
 ## Included Scripts 
 - [Austria Network Visualization](#austria-network-visualization)
+- [Brownfield Infrastructure Visualization](#brownfield-infrastructure-visualization)
 - [Renewables Usage Visualization](#renewables-usage-visualization)
 - [Carrier Usage Visualization](#carrier-usage-visualization)
 - [Animated Renewable Availability](#animated-renewable-availability)
@@ -64,7 +65,49 @@ pip install pypsa geopandas matplotlib cartopy shapely
 
 ---
 
-## Renewables Usage Visualization
+## Brownfield Infrastructure Visualization
+
+### Overview
+
+[`plot_brownfield_infrastructure.py`](plot_brownfield_infrastructure.py) generates an interactive Plotly map showing inter-regional transmission infrastructure (links and lines) with capacity-scaled line widths and carrier-based coloring. The visualization displays:
+
+- **Regional polygons**: Geographic boundaries with subtle shading
+- **Country borders**: Overlaid for geographic context
+- **Transmission links and lines**: Scaled by capacity, colored by carrier type (AC, DC, gas, hydrogen, etc.)
+- **Interactive hover information**: Display capacity in GW for each connection
+- **Legend**: Toggle carriers on/off, capacity scale reference
+- **Optional city markers**: Major cities can be highlighted on the map
+
+### Usage
+
+```bash
+python plot_brownfield_infrastructure.py
+```
+
+### Configuration
+
+Adjust these constants at the top of the script to customize the visualization:
+
+| Constant | Description |
+|----------|-------------|
+| `NETWORK_PATH` | Path to the PyPSA network file (.nc) |
+| `REGIONS_PATH` | Path to region polygons (GeoJSON) |
+| `FALLBACK_REGIONS_PATH` | Fallback regions file if primary doesn't match network locations |
+| `OUTPUT_HTML` | Output path for interactive HTML map |
+| `OUTPUT_STATIC` | Output path for static image (PNG/SVG) |
+| `COUNTRY_ONLY` | Restrict visualization to a specific country (e.g., `"AT"`) or `None` for all |
+| `PLOT_LINES` | Show AC transmission lines (`True`/`False`) |
+| `PLOT_LINKS` | Show DC/other links (`True`/`False`) |
+| `SHOW_MAJOR_CITIES` | Display major European cities on map (`True`/`False`) |
+| `CARRIERS_FILTER` | Filter to specific carriers (e.g., `{"AC", "DC"}`) or `None` for all |
+| `MAP_STYLE` | Plotly map style (e.g., `"carto-positron"`) |
+| `EDGE_OPACITY` | Line opacity (0.0–1.0) |
+| `MIN_WIDTH` / `MAX_WIDTH` | Line width range in pixels |
+
+### Example output 
+
+<img src="pngs/example_bf_infrastructure.png" alt="Renewable usage map" width="300" />
+---
 
 ### Overview
 
