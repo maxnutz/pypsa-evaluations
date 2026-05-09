@@ -295,6 +295,7 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
 	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
 	only feasible expansion ranges (not current or fixed capacities).
+	Assets with zero minimum capacity are skipped to keep bounds focused on enforced minima.
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
 	missing_links = [col for col in required_cols if col not in nw.links.columns]
@@ -603,6 +604,8 @@ def build_infrastructure_table(
 
     min_cap = float(table[sort_capacity].min())
     max_cap = float(table[sort_capacity].max())
+    # In pathway bounds mode, scale both min/max widths against the max-capacity range
+    # so the relative gap between min and max remains visually comparable.
     if mode == "pathway_bounds":
         table["width_max_px"] = table["max_capacity_mw"].map(
             lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
