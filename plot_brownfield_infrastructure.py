@@ -326,7 +326,7 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	components["carrier"] = components["carrier"].astype(str)
 	components["p_nom_extendable"] = components["p_nom_extendable"].fillna(False).astype(bool)
 	components["p_nom_min"] = components["p_nom_min"].fillna(0.0).astype(float)
-	components["p_nom_max"] = components["p_nom_max"].astype(float)
+	components["p_nom_max"] = pd.to_numeric(components["p_nom_max"], errors="coerce")
 
 	components = components[
 		components["p_nom_extendable"]
@@ -865,7 +865,7 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Capacity scale (max): " if is_pathway else "Capacity scale: "
+	legend_prefix = "Capacity scale (max)" if is_pathway else "Capacity scale"
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
@@ -873,7 +873,7 @@ def add_capacity_scale_legend(
 				lat=[None],
 				mode="lines",
 				line={"width": edge_width(sample, min_cap, max_cap, MIN_WIDTH, MAX_WIDTH), "color": "#0f172a"},
-				name=f"{legend_prefix}{label}",
+				name=f"{legend_prefix}: {label}",
 				legendgroup="capacity-scale",
 				showlegend=True,
 				hoverinfo="skip",
