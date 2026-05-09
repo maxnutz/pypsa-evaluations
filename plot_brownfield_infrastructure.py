@@ -60,7 +60,7 @@ CARRIER_CURVATURE_FACTOR = 0.0
 TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
 
 ALLOWED_EVALUATION_MODES = {"installed", "pathway_bounds"}
-MIN_PATHWAY_CAPACITY_MW = 0.0
+MIN_PATHWAY_CAPACITY_THRESHOLD_MW = 0.0
 
 COLOR_DICT = {
     "AC": "#3964F5",
@@ -296,16 +296,17 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
 	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
 	only feasible expansion ranges (not current or fixed capacities).
-	Assets with zero minimum capacity are skipped (p_nom_min > MIN_PATHWAY_CAPACITY_MW) to
+	Assets with zero minimum capacity are skipped (p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to
 	avoid cluttering the visualization with unbounded expansion-only possibilities.
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
-	missing_links = [col for col in required_cols if col not in nw.links.columns]
-	missing_lines = [col for col in required_cols if col not in nw.lines.columns]
-	if missing_links or missing_lines:
+	missing_links_columns = [col for col in required_cols if col not in nw.links.columns]
+	missing_lines_columns = [col for col in required_cols if col not in nw.lines.columns]
+	if missing_links_columns or missing_lines_columns:
 		raise ValueError(
 			"Pathway bounds mode requires p_nom_extendable, p_nom_min, and p_nom_max "
-			f"for Links/Lines. Missing links columns={missing_links}, lines columns={missing_lines}."
+			"for Links/Lines. Missing links columns="
+			f"{missing_links_columns}, lines columns={missing_lines_columns}."
 		)
 
 	links = nw.links[required_cols].copy()
@@ -335,7 +336,7 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 
 	components = components[
 		components["p_nom_extendable"]
-		& components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_MW)
+		& components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_THRESHOLD_MW)
 		& np.isfinite(components["p_nom_max"])
 	].copy()
 
@@ -739,7 +740,7 @@ def add_infrastructure_layers(
 	color_map: dict[str, str],
 	evaluation_mode: str,
 ) -> None:
-    is_pathway = evaluation_mode == "pathway_bounds"
+    is_pathway_bounds = evaluation_mode == "pathway_bounds"
     # Plot links first, then lines. Within each component type, group by carrier.
     # Hover markers are placed at mid-points so capacity info is accessible.
     for component_type in ["link", "line"]:
@@ -764,7 +765,7 @@ def add_infrastructure_layers(
                 mid = len(lon) // 2
                 hover_lon.append(lon[mid])
                 hover_lat.append(lat[mid])
-                if is_pathway:
+                if is_pathway_bounds:
                     min_gw = float(row.min_capacity_mw) / 1000.0
                     max_gw = float(row.max_capacity_mw) / 1000.0
                     hover_text.append(
@@ -792,7 +793,7 @@ def add_infrastructure_layers(
                     float(row.curvature),
                     CURVE_SAMPLES,
                 )
-                if is_pathway:
+                if is_pathway_bounds:
                     fig.add_trace(
                         go.Scattermapbox(
                             lon=lon,
@@ -856,8 +857,8 @@ def add_capacity_scale_legend(
 ) -> None:
 	if infra.empty:
 		return
-	is_pathway = evaluation_mode == "pathway_bounds"
-	capacity_column = "max_capacity_mw" if is_pathway else "capacity_mw"
+	is_pathway_bounds = evaluation_mode == "pathway_bounds"
+	capacity_column = "max_capacity_mw" if is_pathway_bounds else "capacity_mw"
 	if capacity_column not in infra.columns:
 		return
 	min_cap = float(infra[capacity_column].min())
@@ -872,7 +873,7 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Capacity bounds (max)" if is_pathway else "Capacity scale"
+	legend_prefix = "Capacity bounds (max)" if is_pathway_bounds else "Capacity scale"
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
@@ -965,7 +966,7 @@ def export_static_matplotlib(
 		zorder=2,
 	)
 
-	is_pathway = evaluation_mode == "pathway_bounds"
+	is_pathway_bounds = evaluation_mode == "pathway_bounds"
 	for _, row in infra.iterrows():
 		lons, lats = curved_path(
 			float(row["from_lon"]),
@@ -976,7 +977,7 @@ def export_static_matplotlib(
 			CURVE_SAMPLES,
 		)
 		color = color_map.get(str(row["carrier"]), "#334155")
-		if is_pathway:
+		if is_pathway_bounds:
 			ax.plot(
 				lons,
 				lats,
