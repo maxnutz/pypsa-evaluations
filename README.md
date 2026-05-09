@@ -99,7 +99,7 @@ Adjust these constants at the top of the script to customize the visualization:
 | `PLOT_LINES` | Show AC transmission lines (`True`/`False`) |
 | `PLOT_LINKS` | Show DC/other links (`True`/`False`) |
 | `SHOW_MAJOR_CITIES` | Display major European cities on map (`True`/`False`) |
-| `EVALUATION_MODE` | `"installed"` (default) or `"pathway_bounds"` to render min/max capacity bounds |
+| `EVALUATION_MODE` | `"installed"` (default) or `"pathway_bounds"` to render min/max bounds as dual-width lines (max background, min foreground) with updated hover/legend |
 | `CARRIERS_FILTER` | Filter to specific carriers (e.g., `{"AC", "DC"}`) or `None` for all |
 | `MAP_STYLE` | Plotly map style (e.g., `"carto-positron"`) |
 | `EDGE_OPACITY` | Line opacity (0.0–1.0) |

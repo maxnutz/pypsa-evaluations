@@ -30,7 +30,8 @@ PLOT_LINES = True
 PLOT_LINKS = True
 SHOW_MAJOR_CITIES = False
 
-# Evaluation mode: "installed" (current capacity) or "pathway_bounds" (min/max bounds).
+# Evaluation mode: "installed" uses installed-capacity aggregation; "pathway_bounds" shows
+# extendable min/max ranges from p_nom_min/p_nom_max.
 EVALUATION_MODE = "installed"
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
@@ -292,7 +293,8 @@ def extract_geographical_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	"""
 	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
-	Filters strictly before aggregation and excludes p_nom/p_nom_set from calculations.
+	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
+	only feasible expansion ranges (not current or fixed capacities).
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
 	missing_links = [col for col in required_cols if col not in nw.links.columns]
@@ -865,7 +867,7 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Capacity scale (max)" if is_pathway else "Capacity scale"
+	legend_prefix = "Max capacity scale" if is_pathway else "Capacity scale"
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
