@@ -301,13 +301,13 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	with unbounded expansion-only possibilities.
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
-	missing_links_columns = [col for col in required_cols if col not in nw.links.columns]
-	missing_lines_columns = [col for col in required_cols if col not in nw.lines.columns]
-	if missing_links_columns or missing_lines_columns:
+	missing_link_cols = [col for col in required_cols if col not in nw.links.columns]
+	missing_line_cols = [col for col in required_cols if col not in nw.lines.columns]
+	if missing_link_cols or missing_line_cols:
 		raise ValueError(
 			"Pathway bounds mode requires p_nom_extendable, p_nom_min, and p_nom_max "
 			"for Links/Lines. Missing links columns="
-			f"{missing_links_columns}, lines columns={missing_lines_columns}."
+			f"{missing_link_cols}, lines columns={missing_line_cols}."
 		)
 
 	links = nw.links[required_cols].copy()
@@ -874,7 +874,9 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Capacity bounds (max scale)" if is_pathway_bounds else "Capacity scale"
+	legend_label_base = (
+		"Capacity bounds (max scale)" if is_pathway_bounds else "Capacity scale"
+	)
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
@@ -882,7 +884,7 @@ def add_capacity_scale_legend(
 				lat=[None],
 				mode="lines",
 				line={"width": edge_width(sample, min_cap, max_cap, MIN_WIDTH, MAX_WIDTH), "color": "#0f172a"},
-				name=f"{legend_prefix}: {label}",
+				name=f"{legend_label_base}: {label}",
 				legendgroup="capacity-scale",
 				showlegend=True,
 				hoverinfo="skip",
