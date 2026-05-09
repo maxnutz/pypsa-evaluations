@@ -296,8 +296,9 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
 	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
 	only feasible expansion ranges (not current or fixed capacities).
-	Assets with zero minimum capacity are skipped (p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to
-	avoid cluttering the visualization with unbounded expansion-only possibilities.
+	Assets with minimum capacity at or below MIN_PATHWAY_CAPACITY_THRESHOLD_MW are skipped
+	(p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to avoid cluttering the visualization
+	with unbounded expansion-only possibilities.
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
 	missing_links_columns = [col for col in required_cols if col not in nw.links.columns]
@@ -873,7 +874,7 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Capacity bounds (max)" if is_pathway_bounds else "Capacity scale"
+	legend_prefix = "Capacity bounds (max scale)" if is_pathway_bounds else "Capacity scale"
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
