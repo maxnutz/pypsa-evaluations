@@ -30,8 +30,8 @@ PLOT_LINES = True
 PLOT_LINKS = True
 SHOW_MAJOR_CITIES = False
 
-# Evaluation mode: "installed" uses installed-capacity aggregation; "pathway_bounds" shows
-# extendable min/max ranges from p_nom_min/p_nom_max.
+# Evaluation mode: "installed" uses PyPSA installed-capacity statistics for deployed assets;
+# "pathway_bounds" shows extendable min/max ranges from p_nom_min/p_nom_max.
 EVALUATION_MODE = "installed"
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
@@ -60,6 +60,7 @@ CARRIER_CURVATURE_FACTOR = 0.0
 TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
 
 ALLOWED_EVALUATION_MODES = {"installed", "pathway_bounds"}
+MIN_PATHWAY_CAPACITY_MW = 0.0
 
 COLOR_DICT = {
     "AC": "#3964F5",
@@ -295,7 +296,8 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
 	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
 	only feasible expansion ranges (not current or fixed capacities).
-	Assets with zero minimum capacity are skipped to keep bounds focused on enforced minima.
+	Assets with zero minimum capacity are skipped (p_nom_min > MIN_PATHWAY_CAPACITY_MW) to
+	avoid cluttering the visualization with unbounded expansion-only possibilities.
 	"""
 	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
 	missing_links = [col for col in required_cols if col not in nw.links.columns]
@@ -333,7 +335,7 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 
 	components = components[
 		components["p_nom_extendable"]
-		& components["p_nom_min"].gt(0.0)
+		& components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_MW)
 		& np.isfinite(components["p_nom_max"])
 	].copy()
 
@@ -605,7 +607,7 @@ def build_infrastructure_table(
     min_cap = float(table[sort_capacity].min())
     max_cap = float(table[sort_capacity].max())
     # In pathway bounds mode, scale both min/max widths against the max-capacity range
-    # so the relative gap between min and max remains visually comparable.
+    # so the visual width gap between min and max remains proportional across connections.
     if mode == "pathway_bounds":
         table["width_max_px"] = table["max_capacity_mw"].map(
             lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
@@ -870,7 +872,7 @@ def add_capacity_scale_legend(
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
-	legend_prefix = "Max capacity scale" if is_pathway else "Capacity scale"
+	legend_prefix = "Capacity bounds (max)" if is_pathway else "Capacity scale"
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
@@ -1110,8 +1112,9 @@ def main() -> None:
 	if infra.empty:
 		if evaluation_mode == "pathway_bounds":
 			raise ValueError(
-				"No pathway-bounds infrastructure found. Ensure extendable assets "
-				"have p_nom_min > 0 and finite p_nom_max, and check region/carrier filters."
+				"No pathway-bounds infrastructure found. This mode only shows extendable assets "
+				"with enforced minimum capacities (p_nom_min > 0) and finite p_nom_max. "
+				"Check that your network contains such assets and review region/carrier filters."
 			)
 		raise ValueError("No inter-region infrastructure found after filtering.")
 
