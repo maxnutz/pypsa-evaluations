@@ -15,12 +15,14 @@ import pypsa
 # Configuration - set values directly in this script (no CLI parser)
 # ---------------------------------------------------------------------------
 
-NETWORK_PATH = Path("/home/maxnutz/Documents/evaluations/base_s_adm__none_2025.nc")
+NETWORK_PATH = Path(
+    "/home/maxnutz/Documents/scripting/nora_outputs/v2026.04.bug_gas_representation/AT_KN2040/resources/base_s_adm__none_2030.nc"
+)
 REGIONS_PATH = Path("resources/regions_onshore.geojson")
 FALLBACK_REGIONS_PATH = Path("resources/regions_onshore_base_s_adm.geojson")
 
-OUTPUT_HTML = Path("outputs/brownfield_infrastructure_map.html")
-OUTPUT_STATIC = Path("outputs/brownfield_infrastructure_map.svg")
+OUTPUT_HTML = Path("outputs/infrastructure_pathway_2030_with_p_nom_min.html")
+OUTPUT_STATIC = Path("outputs/infrastructure_pathways_2030.svg")
 
 # Set to two-letter country code like "AT" for country focus, or None for all.
 COUNTRY_ONLY = None
@@ -32,7 +34,7 @@ SHOW_MAJOR_CITIES = False
 
 # Evaluation mode: "installed" uses PyPSA installed-capacity statistics for deployed assets;
 # "pathway_bounds" shows extendable min/max ranges from p_nom_min/p_nom_max.
-EVALUATION_MODE = "installed"
+EVALUATION_MODE = "pathway_bounds"
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
 # Example: CARRIERS_FILTER = {"AC", "DC", "H2 pipeline"}
@@ -57,18 +59,23 @@ CURVE_SAMPLES = 20
 PAIR_CURVATURE_FACTOR = 0.11
 CARRIER_CURVATURE_FACTOR = 0.0
 
-TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
+TITLE = (
+    "<b>Planned Infrastructure 2030</b>"
+    "<br><sup>PyPSA energy system | ranges for link expansion</sup>"
+)
 
 ALLOWED_EVALUATION_MODES = {"installed", "pathway_bounds"}
-MIN_PATHWAY_CAPACITY_THRESHOLD_MW = 0.0
+MIN_PATHWAY_CAPACITY_THRESHOLD_MW = 1.0
 
 COLOR_DICT = {
     "AC": "#3964F5",
     "DC": "#480058",
     "gas pipeline": "#FFA213",
+    "gas": "#FFA213",
     "gas pipeline new": "#B47C14",
     "H2 pipeline retrofitted": "#35BFA0",
     "H2 pipeline": "#6DEEC9",
+    "H2": "#6DEEC9",
     "solid biomass transport": "#8DED71",
     "municipal solid waste transport": "#5C6E5F",
     "CO2 pipeline": "#7f7f7f",
@@ -292,116 +299,159 @@ def extract_geographical_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
 
 
 def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
-	"""
-	Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
-	Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
-	only feasible expansion ranges (not current or fixed capacities).
-	Assets with minimum capacity at or below MIN_PATHWAY_CAPACITY_THRESHOLD_MW are skipped
-	(p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to avoid cluttering the visualization
-	with unbounded expansion-only possibilities.
-	"""
-	required_cols = ["bus0", "bus1", "carrier", "p_nom_extendable", "p_nom_min", "p_nom_max"]
-	missing_link_cols = [col for col in required_cols if col not in nw.links.columns]
-	missing_line_cols = [col for col in required_cols if col not in nw.lines.columns]
-	if missing_link_cols or missing_line_cols:
-		raise ValueError(
-			"Pathway bounds mode requires p_nom_extendable, p_nom_min, and p_nom_max "
-			"for Links/Lines. Missing links columns="
-			f"{missing_link_cols}, lines columns={missing_line_cols}."
-		)
+    """
+    Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
+    Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
+    only feasible expansion ranges (not current or fixed capacities).
+    Assets with minimum capacity at or below MIN_PATHWAY_CAPACITY_THRESHOLD_MW are skipped
+    (p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to avoid cluttering the visualization
+    with unbounded expansion-only possibilities.
+    """
+    link_required_cols = [
+        "bus0",
+        "bus1",
+        "carrier",
+        "p_nom_extendable",
+        "p_nom_min",
+        "p_nom_max",
+    ]
+    line_required_cols = [
+        "bus0",
+        "bus1",
+        "carrier",
+        "s_nom_extendable",
+        "s_nom_min",
+        "s_nom_max",
+    ]
+    missing_link_cols = [
+        col for col in link_required_cols if col not in nw.links.columns
+    ]
+    missing_line_cols = [
+        col for col in line_required_cols if col not in nw.lines.columns
+    ]
+    if missing_link_cols or missing_line_cols:
+        raise ValueError(
+            "Pathway bounds mode requires p_nom_* columns for Links and s_nom_* columns "
+            "for Lines. Missing links columns="
+            f"{missing_link_cols}, lines columns={missing_line_cols}."
+        )
 
-	links = nw.links[required_cols].copy()
-	links["component"] = "link"
-	lines = nw.lines[required_cols].copy()
-	lines["component"] = "line"
+    links = nw.links[link_required_cols].copy()
+    links["component"] = "link"
+    lines = (
+        nw.lines[line_required_cols]
+        .copy()
+        .rename(
+            columns={
+                "s_nom_extendable": "p_nom_extendable",
+                "s_nom_min": "p_nom_min",
+                "s_nom_max": "p_nom_max",
+            }
+        )
+    )
+    lines["component"] = "line"
 
-	components = pd.concat([links, lines], ignore_index=True)
-	if components.empty:
-		return pd.DataFrame(
-			columns=[
-				"bus0",
-				"bus1",
-				"carrier",
-				"min_capacity_mw",
-				"max_capacity_mw",
-				"from_region",
-				"to_region",
-				"component",
-			]
-		)
+    components = pd.concat([links, lines], ignore_index=True)
+    if components.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
 
-	components["carrier"] = components["carrier"].astype(str)
-	components["p_nom_extendable"] = components["p_nom_extendable"].fillna(False).astype(bool)
-	components["p_nom_min"] = components["p_nom_min"].fillna(0.0).astype(float)
-	components["p_nom_max"] = pd.to_numeric(components["p_nom_max"], errors="coerce")
+    components["carrier"] = components["carrier"].astype(str)
+    components["p_nom_extendable"] = (
+        components["p_nom_extendable"].fillna(False).astype(bool)
+    )
+    components["p_nom_min"] = components["p_nom_min"].fillna(0.0).astype(float)
+    components["p_nom_max"] = pd.to_numeric(components["p_nom_max"], errors="coerce")
 
-	components = components[
-		components["p_nom_extendable"]
-		& components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_THRESHOLD_MW)
-		& np.isfinite(components["p_nom_max"])
-	].copy()
+    components = components[
+        components["p_nom_extendable"]
+        & components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_THRESHOLD_MW)
+        # & np.isfinite(components["p_nom_max"])
+    ].copy()
+    components.loc[components["p_nom_max"].eq(np.inf), "p_nom_max"] = components.loc[
+        components["p_nom_max"].eq(np.inf), "p_nom_min"
+    ]
+    components["carrier"] = (
+        components["carrier"]
+        .str.strip()
+        .replace(
+            {
+                r"gas pipeline( new)?": "gas",
+                r"H2 pipeline( retrofitted)?": "H2",
+            },
+            regex=True,
+        )
+    )
 
-	if components.empty:
-		return pd.DataFrame(
-			columns=[
-				"bus0",
-				"bus1",
-				"carrier",
-				"min_capacity_mw",
-				"max_capacity_mw",
-				"from_region",
-				"to_region",
-				"component",
-			]
-		)
+    if components.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
 
-	components = (
-		components.groupby(["component", "carrier", "bus0", "bus1"], as_index=False)[
-			["p_nom_min", "p_nom_max"]
-		].sum()
-	)
+    components = components.groupby(
+        ["component", "carrier", "bus0", "bus1"], as_index=False
+    )[["p_nom_min", "p_nom_max"]].sum()
 
-	components["location_bus0"] = components["bus0"].map(nw.buses.location)
-	components["location_bus1"] = components["bus1"].map(nw.buses.location)
+    components["location_bus0"] = components["bus0"].map(nw.buses.location)
+    components["location_bus1"] = components["bus1"].map(nw.buses.location)
 
-	geographical = components[
-		(components["location_bus0"] != components["location_bus1"])
-		& (components["location_bus0"] != "EU")
-		& (components["location_bus1"] != "EU")
-	].copy()
+    geographical = components[
+        (components["location_bus0"] != components["location_bus1"])
+        & (components["location_bus0"] != "EU")
+        & (components["location_bus1"] != "EU")
+    ].copy()
 
-	if geographical.empty:
-		return pd.DataFrame(
-			columns=[
-				"bus0",
-				"bus1",
-				"carrier",
-				"min_capacity_mw",
-				"max_capacity_mw",
-				"from_region",
-				"to_region",
-				"component",
-			]
-		)
+    if geographical.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
 
-	geographical["from_region"] = geographical["location_bus0"]
-	geographical["to_region"] = geographical["location_bus1"]
-	geographical = geographical.rename(
-		columns={"p_nom_min": "min_capacity_mw", "p_nom_max": "max_capacity_mw"}
-	)
+    geographical["from_region"] = geographical["location_bus0"]
+    geographical["to_region"] = geographical["location_bus1"]
+    geographical = geographical.rename(
+        columns={"p_nom_min": "min_capacity_mw", "p_nom_max": "max_capacity_mw"}
+    )
 
-	return geographical[
-		[
-			"bus0",
-			"bus1",
-			"carrier",
-			"min_capacity_mw",
-			"max_capacity_mw",
-			"from_region",
-			"to_region",
-			"component",
-		]
-	]
+    return geographical[
+        [
+            "bus0",
+            "bus1",
+            "carrier",
+            "min_capacity_mw",
+            "max_capacity_mw",
+            "from_region",
+            "to_region",
+            "component",
+        ]
+    ]
 
 
 def filter_infrastructure_by_regions(
