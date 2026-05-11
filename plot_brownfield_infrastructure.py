@@ -6,6 +6,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pypsa
@@ -14,12 +15,14 @@ import pypsa
 # Configuration - set values directly in this script (no CLI parser)
 # ---------------------------------------------------------------------------
 
-NETWORK_PATH = Path("/home/maxnutz/Documents/evaluations/base_s_adm__none_2025.nc")
+NETWORK_PATH = Path(
+    "/home/maxnutz/Documents/scripting/nora_outputs/v2026.04.bug_gas_representation/AT_KN2040/resources/base_s_adm__none_2030.nc"
+)
 REGIONS_PATH = Path("resources/regions_onshore.geojson")
 FALLBACK_REGIONS_PATH = Path("resources/regions_onshore_base_s_adm.geojson")
 
-OUTPUT_HTML = Path("outputs/brownfield_infrastructure_map.html")
-OUTPUT_STATIC = Path("outputs/brownfield_infrastructure_map.svg")
+OUTPUT_HTML = Path("outputs/infrastructure_pathway_2030_with_p_nom_min.html")
+OUTPUT_STATIC = Path("outputs/infrastructure_pathways_2030.svg")
 
 # Set to two-letter country code like "AT" for country focus, or None for all.
 COUNTRY_ONLY = None
@@ -28,6 +31,10 @@ COUNTRY_ONLY = None
 PLOT_LINES = True
 PLOT_LINKS = True
 SHOW_MAJOR_CITIES = False
+
+# Evaluation mode: "installed" uses PyPSA installed-capacity statistics for deployed assets;
+# "pathway_bounds" shows extendable min/max ranges from p_nom_min/p_nom_max.
+EVALUATION_MODE = "pathway_bounds"
 
 # Filter carriers to display. Set to None to show all, or provide a list/set of carrier names.
 # Example: CARRIERS_FILTER = {"AC", "DC", "H2 pipeline"}
@@ -52,15 +59,23 @@ CURVE_SAMPLES = 20
 PAIR_CURVATURE_FACTOR = 0.11
 CARRIER_CURVATURE_FACTOR = 0.0
 
-TITLE = "<b>Brownfield Infrastructure 2025</b>" "<br><sup>PyPSA energy system</sup>"
+TITLE = (
+    "<b>Planned Infrastructure 2030</b>"
+    "<br><sup>PyPSA energy system | ranges for link expansion</sup>"
+)
+
+ALLOWED_EVALUATION_MODES = {"installed", "pathway_bounds"}
+MIN_PATHWAY_CAPACITY_THRESHOLD_MW = 1.0
 
 COLOR_DICT = {
     "AC": "#3964F5",
     "DC": "#480058",
     "gas pipeline": "#FFA213",
+    "gas": "#FFA213",
     "gas pipeline new": "#B47C14",
     "H2 pipeline retrofitted": "#35BFA0",
     "H2 pipeline": "#6DEEC9",
+    "H2": "#6DEEC9",
     "solid biomass transport": "#8DED71",
     "municipal solid waste transport": "#5C6E5F",
     "CO2 pipeline": "#7f7f7f",
@@ -103,6 +118,15 @@ def normalize_region_name(value: object) -> str:
 	if value is None or pd.isna(value):
 		return ""
 	return str(value).removesuffix(" low voltage").strip()
+
+
+def validate_evaluation_mode(mode: str | None) -> str:
+	normalized = (mode or "installed").strip().lower()
+	if normalized not in ALLOWED_EVALUATION_MODES:
+		raise ValueError(
+			f"Invalid EVALUATION_MODE={mode!r}. Expected one of: {sorted(ALLOWED_EVALUATION_MODES)}."
+		)
+	return normalized
 
 
 def infer_country(name: str) -> str:
@@ -274,11 +298,169 @@ def extract_geographical_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
     ]
 
 
+def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
+    """
+    Extract pathway bounds (p_nom_min/p_nom_max) for extendable links and lines.
+    Filters strictly before aggregation and excludes p_nom/p_nom_set so the bounds reflect
+    only feasible expansion ranges (not current or fixed capacities).
+    Assets with minimum capacity at or below MIN_PATHWAY_CAPACITY_THRESHOLD_MW are skipped
+    (p_nom_min > MIN_PATHWAY_CAPACITY_THRESHOLD_MW) to avoid cluttering the visualization
+    with unbounded expansion-only possibilities.
+    """
+    link_required_cols = [
+        "bus0",
+        "bus1",
+        "carrier",
+        "p_nom_extendable",
+        "p_nom_min",
+        "p_nom_max",
+    ]
+    line_required_cols = [
+        "bus0",
+        "bus1",
+        "carrier",
+        "s_nom_extendable",
+        "s_nom_min",
+        "s_nom_max",
+    ]
+    missing_link_cols = [
+        col for col in link_required_cols if col not in nw.links.columns
+    ]
+    missing_line_cols = [
+        col for col in line_required_cols if col not in nw.lines.columns
+    ]
+    if missing_link_cols or missing_line_cols:
+        raise ValueError(
+            "Pathway bounds mode requires p_nom_* columns for Links and s_nom_* columns "
+            "for Lines. Missing links columns="
+            f"{missing_link_cols}, lines columns={missing_line_cols}."
+        )
+
+    links = nw.links[link_required_cols].copy()
+    links["component"] = "link"
+    lines = (
+        nw.lines[line_required_cols]
+        .copy()
+        .rename(
+            columns={
+                "s_nom_extendable": "p_nom_extendable",
+                "s_nom_min": "p_nom_min",
+                "s_nom_max": "p_nom_max",
+            }
+        )
+    )
+    lines["component"] = "line"
+
+    components = pd.concat([links, lines], ignore_index=True)
+    if components.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
+
+    components["carrier"] = components["carrier"].astype(str)
+    components["p_nom_extendable"] = (
+        components["p_nom_extendable"].fillna(False).astype(bool)
+    )
+    components["p_nom_min"] = components["p_nom_min"].fillna(0.0).astype(float)
+    components["p_nom_max"] = pd.to_numeric(components["p_nom_max"], errors="coerce")
+
+    components = components[
+        components["p_nom_extendable"]
+        & components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_THRESHOLD_MW)
+        # & np.isfinite(components["p_nom_max"]) # include non-set p_nom_max or not? <<<<<<<<<<
+    ].copy()
+    # when p_nom_max can be infinite, set value to p_nom_min for plotting <<<<<<<<<<<<<<<<<<<<<
+    components.loc[components["p_nom_max"].eq(np.inf), "p_nom_max"] = components.loc[
+        components["p_nom_max"].eq(np.inf), "p_nom_min"
+    ]
+    components["carrier"] = (
+        components["carrier"]
+        .str.strip()
+        .replace(
+            {
+                r"gas pipeline( new)?": "gas",
+                r"H2 pipeline( retrofitted)?": "H2",
+            },
+            regex=True,
+        )
+    )
+
+    if components.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
+
+    components = components.groupby(
+        ["component", "carrier", "bus0", "bus1"], as_index=False
+    )[["p_nom_min", "p_nom_max"]].sum()
+
+    components["location_bus0"] = components["bus0"].map(nw.buses.location)
+    components["location_bus1"] = components["bus1"].map(nw.buses.location)
+
+    geographical = components[
+        (components["location_bus0"] != components["location_bus1"])
+        & (components["location_bus0"] != "EU")
+        & (components["location_bus1"] != "EU")
+    ].copy()
+
+    if geographical.empty:
+        return pd.DataFrame(
+            columns=[
+                "bus0",
+                "bus1",
+                "carrier",
+                "min_capacity_mw",
+                "max_capacity_mw",
+                "from_region",
+                "to_region",
+                "component",
+            ]
+        )
+
+    geographical["from_region"] = geographical["location_bus0"]
+    geographical["to_region"] = geographical["location_bus1"]
+    geographical = geographical.rename(
+        columns={"p_nom_min": "min_capacity_mw", "p_nom_max": "max_capacity_mw"}
+    )
+
+    return geographical[
+        [
+            "bus0",
+            "bus1",
+            "carrier",
+            "min_capacity_mw",
+            "max_capacity_mw",
+            "from_region",
+            "to_region",
+            "component",
+        ]
+    ]
+
+
 def filter_infrastructure_by_regions(
 	components: pd.DataFrame,
 	valid_regions: set[str],
 	country_only: str | None,
 	carriers_filter: set[str] | None = None,
+	capacity_column: str = "capacity_mw",
 ) -> pd.DataFrame:
     if components.empty:
         return components
@@ -291,11 +473,16 @@ def filter_infrastructure_by_regions(
         # Check if any valid region starts with this region (e.g., 'FR' matches 'FR0', 'FR1')
         return any(vr.startswith(region) for vr in valid_regions)
 
+    if capacity_column not in components.columns:
+        raise ValueError(
+            f"Expected capacity column '{capacity_column}' not found in infrastructure table."
+        )
+
     filtered = components[
         components["from_region"].apply(is_valid_region)
         & components["to_region"].apply(is_valid_region)
         & components["from_region"].ne(components["to_region"])
-        & components["capacity_mw"].gt(0.0)
+        & components[capacity_column].gt(0.0)
     ].copy()
 
     if country_only:
@@ -354,9 +541,16 @@ def build_infrastructure_table(
 	valid_regions: set[str],
 	country_only: str | None,
 	carriers_filter: set[str] | None = None,
+	evaluation_mode: str | None = None,
 ) -> pd.DataFrame:
+    mode = validate_evaluation_mode(evaluation_mode)
     # Extract geographical infrastructure using PyPSA statistics (includes both links and lines)
-    table = extract_geographical_infrastructure(nw)
+    if mode == "pathway_bounds":
+        table = extract_pathway_bounds_infrastructure(nw)
+        capacity_column = "max_capacity_mw"
+    else:
+        table = extract_geographical_infrastructure(nw)
+        capacity_column = "capacity_mw"
 
     if table.empty:
         return pd.DataFrame()
@@ -375,7 +569,11 @@ def build_infrastructure_table(
         return pd.DataFrame()
 
     table = filter_infrastructure_by_regions(
-        table, valid_regions, country_only, carriers_filter
+        table,
+        valid_regions,
+        country_only,
+        carriers_filter,
+        capacity_column=capacity_column,
     )
     if table.empty:
         return table
@@ -406,21 +604,39 @@ def build_infrastructure_table(
     table = table.dropna(subset=["from_lon", "from_lat", "to_lon", "to_lat"]).copy()
 
     # Sum capacities for all connections between same region pair and carrier
-    table = table.groupby(
-        ["from_region", "to_region", "carrier"],
-        as_index=False,
-    ).agg(
-        {
-            "component": "first",
-            "bus0": "first",
-            "bus1": "first",
-            "capacity_mw": "sum",
-            "from_lon": "first",
-            "from_lat": "first",
-            "to_lon": "first",
-            "to_lat": "first",
-        }
-    )
+    if mode == "pathway_bounds":
+        table = table.groupby(
+            ["from_region", "to_region", "carrier"],
+            as_index=False,
+        ).agg(
+            {
+                "component": "first",
+                "bus0": "first",
+                "bus1": "first",
+                "min_capacity_mw": "sum",
+                "max_capacity_mw": "sum",
+                "from_lon": "first",
+                "from_lat": "first",
+                "to_lon": "first",
+                "to_lat": "first",
+            }
+        )
+    else:
+        table = table.groupby(
+            ["from_region", "to_region", "carrier"],
+            as_index=False,
+        ).agg(
+            {
+                "component": "first",
+                "bus0": "first",
+                "bus1": "first",
+                "capacity_mw": "sum",
+                "from_lon": "first",
+                "from_lat": "first",
+                "to_lon": "first",
+                "to_lat": "first",
+            }
+        )
 
     table["pair_key"] = (
         table["from_region"].where(
@@ -434,17 +650,28 @@ def build_infrastructure_table(
         )
     )
 
+    sort_capacity = "max_capacity_mw" if mode == "pathway_bounds" else "capacity_mw"
     table = table.sort_values(
-        ["pair_key", "carrier", "capacity_mw"],
+        ["pair_key", "carrier", sort_capacity],
         ascending=[True, True, False],
         kind="stable",
     ).reset_index(drop=True)
 
-    min_cap = float(table["capacity_mw"].min())
-    max_cap = float(table["capacity_mw"].max())
-    table["width_px"] = table["capacity_mw"].map(
-        lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
-    )
+    min_cap = float(table[sort_capacity].min())
+    max_cap = float(table[sort_capacity].max())
+    # In pathway bounds mode, scale both min/max widths against the max-capacity range
+    # so the visual width gap between min and max remains proportional across connections.
+    if mode == "pathway_bounds":
+        table["width_max_px"] = table["max_capacity_mw"].map(
+            lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
+        )
+        table["width_min_px"] = table["min_capacity_mw"].map(
+            lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
+        )
+    else:
+        table["width_px"] = table["capacity_mw"].map(
+            lambda cap: edge_width(float(cap), min_cap, max_cap, MIN_WIDTH, MAX_WIDTH)
+        )
 
     table["curvature"] = 0.0
     for pair_key, pair_index in table.groupby("pair_key").groups.items():
@@ -559,7 +786,13 @@ def add_city_layer(fig: go.Figure, country_only: str | None) -> None:
 	)
 
 
-def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: dict[str, str]) -> None:
+def add_infrastructure_layers(
+	fig: go.Figure,
+	infra: pd.DataFrame,
+	color_map: dict[str, str],
+	evaluation_mode: str,
+) -> None:
+    is_pathway_bounds = evaluation_mode == "pathway_bounds"
     # Plot links first, then lines. Within each component type, group by carrier.
     # Hover markers are placed at mid-points so capacity info is accessible.
     for component_type in ["link", "line"]:
@@ -584,12 +817,22 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
                 mid = len(lon) // 2
                 hover_lon.append(lon[mid])
                 hover_lat.append(lat[mid])
-                cap_gw = float(row.capacity_mw) / 1000.0
-                hover_text.append(
-                    f"<b>{row.from_region} → {row.to_region}</b>"
-                    f"<br>Carrier: {carrier}"
-                    f"<br>Capacity: {cap_gw:.2f} GW"
-                )
+                if is_pathway_bounds:
+                    min_gw = float(row.min_capacity_mw) / 1000.0
+                    max_gw = float(row.max_capacity_mw) / 1000.0
+                    hover_text.append(
+                        f"<b>{row.from_region} → {row.to_region}</b>"
+                        f"<br>Carrier: {carrier}"
+                        f"<br>Min capacity: {min_gw:.2f} GW"
+                        f"<br>Max capacity: {max_gw:.2f} GW"
+                    )
+                else:
+                    cap_gw = float(row.capacity_mw) / 1000.0
+                    hover_text.append(
+                        f"<b>{row.from_region} → {row.to_region}</b>"
+                        f"<br>Carrier: {carrier}"
+                        f"<br>Capacity: {cap_gw:.2f} GW"
+                    )
 
             color = color_map.get(str(carrier), "#334155")
             isfirst = True
@@ -602,19 +845,47 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
                     float(row.curvature),
                     CURVE_SAMPLES,
                 )
-                fig.add_trace(
-                    go.Scattermapbox(
-                        lon=lon,
-                        lat=lat,
-                        mode="lines",
-                        line={"width": row.width_px, "color": color},
-                        opacity=EDGE_OPACITY,
-                        name=str(carrier),
-                        legendgroup=f"carrier::{carrier}",
-                        showlegend=isfirst,
-                        hoverinfo="skip",
+                if is_pathway_bounds:
+                    fig.add_trace(
+                        go.Scattermapbox(
+                            lon=lon,
+                            lat=lat,
+                            mode="lines",
+                            line={"width": row.width_max_px, "color": color},
+                            opacity=EDGE_OPACITY,
+                            name=str(carrier),
+                            legendgroup=f"carrier::{carrier}",
+                            showlegend=isfirst,
+                            hoverinfo="skip",
+                        )
                     )
-                )
+                    fig.add_trace(
+                        go.Scattermapbox(
+                            lon=lon,
+                            lat=lat,
+                            mode="lines",
+                            line={"width": row.width_min_px, "color": color},
+                            opacity=EDGE_OPACITY,
+                            name=str(carrier),
+                            legendgroup=f"carrier::{carrier}",
+                            showlegend=False,
+                            hoverinfo="skip",
+                        )
+                    )
+                else:
+                    fig.add_trace(
+                        go.Scattermapbox(
+                            lon=lon,
+                            lat=lat,
+                            mode="lines",
+                            line={"width": row.width_px, "color": color},
+                            opacity=EDGE_OPACITY,
+                            name=str(carrier),
+                            legendgroup=f"carrier::{carrier}",
+                            showlegend=isfirst,
+                            hoverinfo="skip",
+                        )
+                    )
                 isfirst = False
 
             # Invisible hover markers at segment mid-points (no extra visual clutter).
@@ -633,11 +904,21 @@ def add_infrastructure_layers(fig: go.Figure, infra: pd.DataFrame, color_map: di
             )
 
 
-def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
+def add_capacity_scale_legend(
+	fig: go.Figure, infra: pd.DataFrame, evaluation_mode: str
+) -> None:
 	if infra.empty:
 		return
-	min_cap = float(infra["capacity_mw"].min())
-	max_cap = float(infra["capacity_mw"].max())
+	is_pathway_bounds = evaluation_mode == "pathway_bounds"
+	capacity_column = "max_capacity_mw" if is_pathway_bounds else "capacity_mw"
+	if capacity_column not in infra.columns:
+		raise ValueError(
+			f"add_capacity_scale_legend expected column '{capacity_column}' for "
+			f"evaluation_mode='{evaluation_mode}', but it is missing from infra "
+			f"(available columns: {list(infra.columns)!r})."
+		)
+	min_cap = float(infra[capacity_column].min())
+	max_cap = float(infra[capacity_column].max())
 	samples = [
 		max(min_cap, min(max_cap, q))
 		for q in [
@@ -648,6 +929,9 @@ def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
 	]
 	labels = [f"{s/1000.0:.2f} GW" for s in samples]
 
+	legend_label_base = (
+		"Capacity bounds (max scale)" if is_pathway_bounds else "Capacity scale"
+	)
 	for sample, label in zip(samples, labels):
 		fig.add_trace(
 			go.Scattermapbox(
@@ -655,7 +939,7 @@ def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
 				lat=[None],
 				mode="lines",
 				line={"width": edge_width(sample, min_cap, max_cap, MIN_WIDTH, MAX_WIDTH), "color": "#0f172a"},
-				name=f"Capacity scale: {label}",
+				name=f"{legend_label_base}: {label}",
 				legendgroup="capacity-scale",
 				showlegend=True,
 				hoverinfo="skip",
@@ -663,7 +947,12 @@ def add_capacity_scale_legend(fig: go.Figure, infra: pd.DataFrame) -> None:
 		)
 
 
-def build_figure(regions: gpd.GeoDataFrame, infra: pd.DataFrame, country_only: str | None) -> go.Figure:
+def build_figure(
+	regions: gpd.GeoDataFrame,
+	infra: pd.DataFrame,
+	country_only: str | None,
+	evaluation_mode: str,
+) -> go.Figure:
     fig = go.Figure()
 
     color_map = (
@@ -674,8 +963,8 @@ def build_figure(regions: gpd.GeoDataFrame, infra: pd.DataFrame, country_only: s
     add_region_layer(fig, regions)
     add_country_borders(fig, regions)
     if not infra.empty:
-        add_infrastructure_layers(fig, infra, color_map)
-        add_capacity_scale_legend(fig, infra)
+        add_infrastructure_layers(fig, infra, color_map, evaluation_mode)
+        add_capacity_scale_legend(fig, infra, evaluation_mode)
     add_city_layer(fig, country_only)
 
     minx, miny, maxx, maxy = regions.total_bounds
@@ -713,6 +1002,7 @@ def export_static_matplotlib(
 	color_map: dict[str, str],
 	output_static: Path,
 	country_only: str | None,
+	evaluation_mode: str,
 ) -> None:
 	fig, ax = plt.subplots(figsize=(16, 11), constrained_layout=True)
 	fig.patch.set_facecolor(PAPER_BG_COLOR)
@@ -734,6 +1024,7 @@ def export_static_matplotlib(
 		zorder=2,
 	)
 
+	is_pathway_bounds = evaluation_mode == "pathway_bounds"
 	for _, row in infra.iterrows():
 		lons, lats = curved_path(
 			float(row["from_lon"]),
@@ -743,15 +1034,36 @@ def export_static_matplotlib(
 			float(row["curvature"]),
 			CURVE_SAMPLES,
 		)
-		ax.plot(
-			lons,
-			lats,
-			color=color_map.get(str(row["carrier"]), "#334155"),
-			linewidth=float(row["width_px"]) * 0.7,
-			alpha=EDGE_OPACITY,
-			solid_capstyle="round",
-			zorder=3,
-		)
+		color = color_map.get(str(row["carrier"]), "#334155")
+		if is_pathway_bounds:
+			ax.plot(
+				lons,
+				lats,
+				color=color,
+				linewidth=float(row["width_max_px"]) * 0.7,
+				alpha=EDGE_OPACITY,
+				solid_capstyle="round",
+				zorder=3,
+			)
+			ax.plot(
+				lons,
+				lats,
+				color=color,
+				linewidth=float(row["width_min_px"]) * 0.7,
+				alpha=EDGE_OPACITY,
+				solid_capstyle="round",
+				zorder=4,
+			)
+		else:
+			ax.plot(
+				lons,
+				lats,
+				color=color,
+				linewidth=float(row["width_px"]) * 0.7,
+				alpha=EDGE_OPACITY,
+				solid_capstyle="round",
+				zorder=3,
+			)
 
 	cities = MAJOR_CITIES
 	if country_only:
@@ -793,6 +1105,7 @@ def export_figure(
 	infra: pd.DataFrame,
 	color_map: dict[str, str],
 	country_only: str | None,
+	evaluation_mode: str,
 ) -> None:
     output_html.parent.mkdir(parents=True, exist_ok=True)
     output_static.parent.mkdir(parents=True, exist_ok=True)
@@ -810,7 +1123,7 @@ def export_figure(
     except Exception as exc:
         try:
             export_static_matplotlib(
-                regions, infra, color_map, output_static, country_only
+                regions, infra, color_map, output_static, country_only, evaluation_mode
             )
             print(
                 f"[WARN] Plotly static export failed, used matplotlib fallback. Error: {exc}"
@@ -824,6 +1137,10 @@ def export_figure(
 def main() -> None:
 	print(f"[INFO] Loading network: {NETWORK_PATH}")
 	nw = pypsa.Network(NETWORK_PATH)
+	evaluation_mode = validate_evaluation_mode(EVALUATION_MODE)
+	print(f"[INFO] Evaluation mode: {evaluation_mode}")
+	if evaluation_mode == "pathway_bounds":
+		print("[INFO] Pathway bounds mode uses p_nom_min/p_nom_max; scale shows max capacity.")
 
 	regions = load_regions(REGIONS_PATH, FALLBACK_REGIONS_PATH, nw)
 	regions = filter_regions(regions, COUNTRY_ONLY)
@@ -833,7 +1150,14 @@ def main() -> None:
 	# Convert CARRIERS_FILTER to set if provided
 	carriers_filter_set = set(CARRIERS_FILTER) if CARRIERS_FILTER is not None else None
 	
-	infra = build_infrastructure_table(nw, centers, valid_regions, COUNTRY_ONLY, carriers_filter_set)
+	infra = build_infrastructure_table(
+		nw,
+		centers,
+		valid_regions,
+		COUNTRY_ONLY,
+		carriers_filter_set,
+		evaluation_mode,
+	)
 	n_links = int((infra["component"] == "link").sum()) if not infra.empty else 0
 	n_lines = int((infra["component"] == "line").sum()) if not infra.empty else 0
 
@@ -845,11 +1169,26 @@ def main() -> None:
 		print(f"[INFO] Carriers filter applied: {CARRIERS_FILTER}")
 
 	if infra.empty:
+		if evaluation_mode == "pathway_bounds":
+			raise ValueError(
+				"No pathway-bounds infrastructure found. This mode only shows extendable assets "
+				"with enforced minimum capacities (p_nom_min > 0) and finite p_nom_max. "
+				"Check that your network contains such assets and review region/carrier filters."
+			)
 		raise ValueError("No inter-region infrastructure found after filtering.")
 
 	color_map = generate_color_map(infra["carrier"].astype(str).tolist())
-	fig = build_figure(regions, infra, COUNTRY_ONLY)
-	export_figure(fig, OUTPUT_HTML, OUTPUT_STATIC, regions, infra, color_map, COUNTRY_ONLY)
+	fig = build_figure(regions, infra, COUNTRY_ONLY, evaluation_mode)
+	export_figure(
+		fig,
+		OUTPUT_HTML,
+		OUTPUT_STATIC,
+		regions,
+		infra,
+		color_map,
+		COUNTRY_ONLY,
+		evaluation_mode,
+	)
 
 
 if __name__ == "__main__":
