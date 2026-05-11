@@ -912,7 +912,11 @@ def add_capacity_scale_legend(
 	is_pathway_bounds = evaluation_mode == "pathway_bounds"
 	capacity_column = "max_capacity_mw" if is_pathway_bounds else "capacity_mw"
 	if capacity_column not in infra.columns:
-		return
+		raise ValueError(
+			f"add_capacity_scale_legend expected column '{capacity_column}' for "
+			f"evaluation_mode='{evaluation_mode}', but it is missing from infra "
+			f"(available columns: {list(infra.columns)!r})."
+		)
 	min_cap = float(infra[capacity_column].min())
 	max_cap = float(infra[capacity_column].max())
 	samples = [
