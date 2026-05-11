@@ -376,8 +376,9 @@ def extract_pathway_bounds_infrastructure(nw: pypsa.Network) -> pd.DataFrame:
     components = components[
         components["p_nom_extendable"]
         & components["p_nom_min"].gt(MIN_PATHWAY_CAPACITY_THRESHOLD_MW)
-        # & np.isfinite(components["p_nom_max"])
+        # & np.isfinite(components["p_nom_max"]) # include non-set p_nom_max or not? <<<<<<<<<<
     ].copy()
+    # when p_nom_max can be infinite, set value to p_nom_min for plotting <<<<<<<<<<<<<<<<<<<<<
     components.loc[components["p_nom_max"].eq(np.inf), "p_nom_max"] = components.loc[
         components["p_nom_max"].eq(np.inf), "p_nom_min"
     ]
